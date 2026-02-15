@@ -224,15 +224,16 @@ function generateAnalysis(klines: KlineData[], market: MarketData) {
   const bullPct = Math.round((bullScore / totalWeight) * 100);
   const bearPct = Math.round((bearScore / totalWeight) * 100);
 
-  const bullProb = Math.max(10, Math.min(80, 30 + bullPct - bearPct));
-  const bearProb = Math.max(10, Math.min(80, 30 + bearPct - bullPct));
-  const neutralProb = 100 - bullProb - bearProb;
+  // Probabilities in canonical [0,1] range
+  const bullProb = Math.max(0.10, Math.min(0.80, (30 + bullPct - bearPct) / 100));
+  const bearProb = Math.max(0.10, Math.min(0.80, (30 + bearPct - bullPct) / 100));
+  const neutralProb = Math.max(0, 1 - bullProb - bearProb);
 
   const scenarios = [
     {
       type: "bullish" as const,
       probability: bullProb,
-      confidence: (bullProb > 55 ? "MEDIUM" : "LOW") as "LOW" | "MEDIUM" | "HIGH",
+      confidence: (bullProb > 0.55 ? "MEDIUM" : "LOW") as "LOW" | "MEDIUM" | "HIGH",
       entryZones: [{ priceRange: [Math.round(price * 0.99 * 100) / 100, Math.round(price * 0.995 * 100) / 100] as [number, number], trigger: `4h close above EMA 20 ($${ema20.toFixed(2)}) with volume`, timeframe: "4h", score: Math.min(95, 50 + bullPct) }],
       stopLoss: { level: Math.round((price - atr * 2) * 100) / 100, condition: `4h close below $${(price - atr * 2).toFixed(2)} (2x ATR)` },
       targets: [
@@ -246,7 +247,7 @@ function generateAnalysis(klines: KlineData[], market: MarketData) {
     {
       type: "bearish" as const,
       probability: bearProb,
-      confidence: (bearProb > 55 ? "MEDIUM" : "LOW") as "LOW" | "MEDIUM" | "HIGH",
+      confidence: (bearProb > 0.55 ? "MEDIUM" : "LOW") as "LOW" | "MEDIUM" | "HIGH",
       entryZones: [{ priceRange: [Math.round(price * 1.005 * 100) / 100, Math.round(price * 1.01 * 100) / 100] as [number, number], trigger: "Rejection at resistance with bearish divergence", timeframe: "4h", score: Math.min(95, 50 + bearPct) }],
       stopLoss: { level: Math.round((price + atr * 2) * 100) / 100, condition: `4h close above $${(price + atr * 2).toFixed(2)}` },
       targets: [
@@ -258,7 +259,7 @@ function generateAnalysis(klines: KlineData[], market: MarketData) {
     },
     {
       type: "neutral" as const,
-      probability: Math.max(5, neutralProb),
+      probability: Math.max(0.05, neutralProb),
       confidence: "LOW" as const,
       entryZones: [],
       stopLoss: { level: 0, condition: "N/A — range-bound, no directional bias" },
