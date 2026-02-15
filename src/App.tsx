@@ -11,6 +11,7 @@ import Dashboard from "@/pages/Dashboard";
 import WhaleWatch from "@/pages/WhaleWatch";
 import PaperTrades from "@/pages/PaperTrades";
 import NewsIntelligence from "@/pages/NewsIntelligence";
+import MetaCognition from "@/pages/MetaCognition";
 import Login from "@/pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -36,6 +37,7 @@ const App = () => (
                       <Route path="/whale-watch" element={<WhaleWatch />} />
                       <Route path="/paper-trades" element={<PaperTrades />} />
                       <Route path="/news" element={<NewsIntelligence />} />
+                      <Route path="/meta" element={<MetaCognition />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>

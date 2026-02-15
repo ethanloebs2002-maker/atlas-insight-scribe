@@ -14,6 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_messages: {
+        Row: {
+          asset_id: string | null
+          body_markdown: string
+          category: Database["public"]["Enums"]["admin_msg_category"]
+          created_at: string
+          evidence_json: Json
+          id: string
+          read: boolean
+          responded_by: string | null
+          response_text: string | null
+          sender_type: Database["public"]["Enums"]["admin_sender_type"]
+          severity: Database["public"]["Enums"]["admin_msg_severity"]
+          title: string
+        }
+        Insert: {
+          asset_id?: string | null
+          body_markdown?: string
+          category?: Database["public"]["Enums"]["admin_msg_category"]
+          created_at?: string
+          evidence_json?: Json
+          id?: string
+          read?: boolean
+          responded_by?: string | null
+          response_text?: string | null
+          sender_type?: Database["public"]["Enums"]["admin_sender_type"]
+          severity?: Database["public"]["Enums"]["admin_msg_severity"]
+          title: string
+        }
+        Update: {
+          asset_id?: string | null
+          body_markdown?: string
+          category?: Database["public"]["Enums"]["admin_msg_category"]
+          created_at?: string
+          evidence_json?: Json
+          id?: string
+          read?: boolean
+          responded_by?: string | null
+          response_text?: string | null
+          sender_type?: Database["public"]["Enums"]["admin_sender_type"]
+          severity?: Database["public"]["Enums"]["admin_msg_severity"]
+          title?: string
+        }
+        Relationships: []
+      }
       anomaly_events: {
         Row: {
           asset_id: string
@@ -101,6 +146,75 @@ export type Database = {
           trend_strength?: number
           volatility_rank?: number
           volume_profile?: number
+        }
+        Relationships: []
+      }
+      authority_states: {
+        Row: {
+          asset_id: string
+          authority_level: number
+          created_at: string
+          id: string
+          last_change_ts: string
+          rationale_json: Json
+          timeframe_class: string
+          updated_at: string
+        }
+        Insert: {
+          asset_id: string
+          authority_level?: number
+          created_at?: string
+          id?: string
+          last_change_ts?: string
+          rationale_json?: Json
+          timeframe_class?: string
+          updated_at?: string
+        }
+        Update: {
+          asset_id?: string
+          authority_level?: number
+          created_at?: string
+          id?: string
+          last_change_ts?: string
+          rationale_json?: Json
+          timeframe_class?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      epistemic_attributions: {
+        Row: {
+          asset_id: string
+          created_at: string
+          data_insufficiency_p: number
+          data_integrity_failure_p: number
+          id: string
+          model_miscalibration_p: number
+          structural_change_p: number
+          timeframe_class: string
+          ts: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          data_insufficiency_p?: number
+          data_integrity_failure_p?: number
+          id?: string
+          model_miscalibration_p?: number
+          structural_change_p?: number
+          timeframe_class?: string
+          ts?: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          data_insufficiency_p?: number
+          data_integrity_failure_p?: number
+          id?: string
+          model_miscalibration_p?: number
+          structural_change_p?: number
+          timeframe_class?: string
+          ts?: string
         }
         Relationships: []
       }
@@ -351,6 +465,129 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      introspection_snapshots: {
+        Row: {
+          asset_id: string
+          created_at: string
+          id: string
+          integrity_state: Json
+          learning_state: Json
+          reasoning_composition: Json
+          timeframe_class: string
+          ts: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          id?: string
+          integrity_state?: Json
+          learning_state?: Json
+          reasoning_composition?: Json
+          timeframe_class?: string
+          ts?: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          id?: string
+          integrity_state?: Json
+          learning_state?: Json
+          reasoning_composition?: Json
+          timeframe_class?: string
+          ts?: string
+        }
+        Relationships: []
+      }
+      maturity_states: {
+        Row: {
+          asset_id: string
+          confidence: number
+          cooldown_until: string | null
+          created_at: string
+          demotion_streak: number
+          id: string
+          last_change_ts: string
+          maturity_level: number
+          promotion_streak: number
+          reasons_json: Json
+          timeframe_class: string
+          updated_at: string
+        }
+        Insert: {
+          asset_id: string
+          confidence?: number
+          cooldown_until?: string | null
+          created_at?: string
+          demotion_streak?: number
+          id?: string
+          last_change_ts?: string
+          maturity_level?: number
+          promotion_streak?: number
+          reasons_json?: Json
+          timeframe_class?: string
+          updated_at?: string
+        }
+        Update: {
+          asset_id?: string
+          confidence?: number
+          cooldown_until?: string | null
+          created_at?: string
+          demotion_streak?: number
+          id?: string
+          last_change_ts?: string
+          maturity_level?: number
+          promotion_streak?: number
+          reasons_json?: Json
+          timeframe_class?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      meta_evaluations: {
+        Row: {
+          abstention_quality: number
+          asset_id: string
+          calibration_error: number
+          created_at: string
+          early_warning_lead_time: number
+          false_alarm_rate: number
+          hypothesis_diversity: number
+          id: string
+          learning_instability: number
+          overconfidence_risk: number
+          timeframe_class: string
+          ts: string
+        }
+        Insert: {
+          abstention_quality?: number
+          asset_id: string
+          calibration_error?: number
+          created_at?: string
+          early_warning_lead_time?: number
+          false_alarm_rate?: number
+          hypothesis_diversity?: number
+          id?: string
+          learning_instability?: number
+          overconfidence_risk?: number
+          timeframe_class?: string
+          ts?: string
+        }
+        Update: {
+          abstention_quality?: number
+          asset_id?: string
+          calibration_error?: number
+          created_at?: string
+          early_warning_lead_time?: number
+          false_alarm_rate?: number
+          hypothesis_diversity?: number
+          id?: string
+          learning_instability?: number
+          overconfidence_risk?: number
+          timeframe_class?: string
+          ts?: string
+        }
+        Relationships: []
       }
       news_agenda_signals: {
         Row: {
@@ -1260,6 +1497,9 @@ export type Database = {
       is_user_active: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
+      admin_msg_category: "maturity" | "warning" | "audit" | "manual"
+      admin_msg_severity: "info" | "watch" | "important"
+      admin_sender_type: "admin" | "atlas"
       app_role: "admin" | "user"
     }
     CompositeTypes: {
@@ -1388,6 +1628,9 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      admin_msg_category: ["maturity", "warning", "audit", "manual"],
+      admin_msg_severity: ["info", "watch", "important"],
+      admin_sender_type: ["admin", "atlas"],
       app_role: ["admin", "user"],
     },
   },

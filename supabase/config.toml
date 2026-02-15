@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.news-engine]
 verify_jwt = false
+
+[functions.meta-engine]
+verify_jwt = false
