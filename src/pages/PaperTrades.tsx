@@ -21,8 +21,9 @@ import EvaluateButton from "@/components/EvaluateButton";
 import RunAnalysisEmptyState from "@/components/RunAnalysisEmptyState";
 import BestTimeframeBadge from "@/components/BestTimeframeBadge";
 import TimeframePerformancePanel from "@/components/TimeframePerformancePanel";
-import DecisionChart from "@/components/DecisionChart";
+import DecisionChart, { type Candle } from "@/components/DecisionChart";
 import { useIncorporatedAssets, useAutoEvalTick } from "@/hooks/use-auto-eval";
+import { useAssetAnalysis } from "@/hooks/use-crypto-data";
 import { type EvalCadence, CADENCE_OPTIONS, setEvalCadence, getEvalCadence } from "@/lib/eval-cadence";
 
 export default function PaperTrades() {
@@ -237,13 +238,12 @@ export default function PaperTrades() {
                           {isExpanded && (
                             <TableRow key={`${d.id}-chart`}>
                               <TableCell colSpan={10} className="p-3 bg-secondary/20">
-                                <DecisionChart
+                                <DecisionChartWithData
                                   symbol={d.asset_id}
                                   timeframe={d.timeframe || "4h"}
                                   entry={entryPrice}
                                   stopLoss={stopLoss}
                                   takeProfit={takeProfit}
-                                  refPrice={entryPrice}
                                 />
                               </TableCell>
                             </TableRow>
@@ -693,5 +693,31 @@ function GateCard({ label, value, required, pass }: { label: string; value: stri
       <div className="text-xs font-mono font-bold">{value}</div>
       <div className="text-[9px] font-mono text-muted-foreground">req: {required}</div>
     </div>
+  );
+}
+
+// ─── DECISION CHART WITH LIVE DATA ──────────────────────────────
+function DecisionChartWithData({ symbol, timeframe, entry, stopLoss, takeProfit }: {
+  symbol: string; timeframe: string; entry: number; stopLoss: number; takeProfit: number;
+}) {
+  const { data: analysis } = useAssetAnalysis(symbol, timeframe);
+  const candles: Candle[] | undefined = analysis?.chartData?.map((c: any) => ({
+    t: c.time,
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+  }));
+
+  return (
+    <DecisionChart
+      symbol={symbol}
+      timeframe={timeframe}
+      entry={entry}
+      stopLoss={stopLoss}
+      takeProfit={takeProfit}
+      candles={candles}
+      refPrice={entry}
+    />
   );
 }
