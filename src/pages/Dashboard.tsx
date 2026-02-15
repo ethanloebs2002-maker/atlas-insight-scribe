@@ -10,6 +10,7 @@ import SystemStatusBanner from '@/components/SystemStatusBanner';
 import { Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { AssetOverview, ScenarioData, ConsensusData } from '@/types/atlas';
+import { normalizeScenarioPercents } from '@/lib/normalize-scenarios';
 
 const emptyAsset: AssetOverview = {
   symbol: '---',
@@ -40,6 +41,13 @@ export default function Dashboard() {
   const scenarios: ScenarioData[] = analysis?.scenarios || [];
   const consensus = analysis?.consensus || emptyConsensus;
   const bullScenario = scenarios.find(s => s.type === 'bullish');
+
+  const normalizedPcts = normalizeScenarioPercents({
+    bull: scenarios.find(s => s.type === 'bullish')?.probability ?? 0,
+    bear: scenarios.find(s => s.type === 'bearish')?.probability ?? 0,
+    neutral: scenarios.find(s => s.type === 'neutral')?.probability ?? 0,
+  });
+  const pctMap: Record<string, number> = { bullish: normalizedPcts.bull, bearish: normalizedPcts.bear, neutral: normalizedPcts.neutral };
 
   return (
     <div className="space-y-6">
@@ -101,7 +109,7 @@ export default function Dashboard() {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {scenarios.map(s => (
-                  <ScenarioCard key={s.type} scenario={s} />
+                  <ScenarioCard key={s.type} scenario={s} displayPercent={pctMap[s.type] ?? 0} />
                 ))}
               </div>
             </section>
