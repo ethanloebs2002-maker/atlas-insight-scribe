@@ -187,6 +187,38 @@ async function recordTrade(body: any) {
   return data;
 }
 
+// ─── CADENCE GUARD ───────────────────────────────────────────────
+async function checkCadenceGuard(emittedBy: string): Promise<{ allowed: boolean; reason?: string }> {
+  // Manual evaluations bypass the cadence guard
+  if (emittedBy === "MANUAL_EVALUATE") return { allowed: true };
+
+  const { data: settings } = await supabase
+    .from("atlas_settings")
+    .select("*")
+    .eq("id", "global")
+    .maybeSingle();
+
+  if (!settings) return { allowed: true }; // no settings row = allow
+
+  const cadenceMs = settings.eval_cadence_ms || 3600000;
+  const lastAt = settings.last_auto_eval_at;
+
+  if (lastAt) {
+    const elapsed = Date.now() - new Date(lastAt).getTime();
+    if (elapsed < cadenceMs) {
+      return { allowed: false, reason: `Cadence guard: ${elapsed}ms elapsed < ${cadenceMs}ms cadence` };
+    }
+  }
+
+  // Atomically stamp last_auto_eval_at
+  await supabase.from("atlas_settings").update({
+    last_auto_eval_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq("id", "global");
+
+  return { allowed: true };
+}
+
 // ─── EMIT DECISION (GUARANTEED) ──────────────────────────────────
 async function emitDecision(
   runId: string,
@@ -204,10 +236,14 @@ async function emitDecision(
     evaluatedTrades: number;
     error: string | null;
     regime?: string;
-  }
+  },
+  emittedBy: string = "UNKNOWN"
 ) {
   const horizon = routeHorizon(timeframe, context.regime);
-  await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "emitDecision called", { ...context, routed_horizon: horizon });
+  const emitRunId = crypto.randomUUID();
+  const emittedAt = new Date().toISOString();
+  const provenance = { emitted_by: emittedBy, emit_run_id: emitRunId, emitted_at: emittedAt };
+  await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "emitDecision called", { ...context, routed_horizon: horizon, emittedBy });
 
   // A) If anomaly halt => PAUSED decision
   if (context.anomalyHalt) {
@@ -227,6 +263,7 @@ async function emitDecision(
         blockers: [context.haltReason || "System in HALT state"],
         version_tag: VERSION_TAG,
       },
+      ...provenance,
     }).select().single();
 
     await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "PAUSED decision written", { id: decision.data?.id });
@@ -251,6 +288,7 @@ async function emitDecision(
         blockers: [context.error],
         version_tag: VERSION_TAG,
       },
+      ...provenance,
     }).select().single();
 
     await trace(runId, assetId, timeframe, "FINALIZE", "ERROR", "ERROR decision written", { id: decision.data?.id });
@@ -305,6 +343,7 @@ async function emitDecision(
           },
           version_tag: VERSION_TAG,
         },
+        ...provenance,
       }).select().single();
 
       // Also create a paper trade
@@ -375,6 +414,7 @@ async function emitDecision(
       },
       version_tag: VERSION_TAG,
     },
+    ...provenance,
   }).select().single();
 
   await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "NO_TRADE decision written", { id: decision.data?.id, blockers });
@@ -711,7 +751,18 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
 }
 
 // ─── FULL EVALUATE PIPELINE (WITH DECISION EMISSION) ──────────────
-async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: string) {
+async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: string, emittedBy: string = "UNKNOWN") {
+  // Cadence guard: block if too soon (except MANUAL)
+  const guard = await checkCadenceGuard(emittedBy);
+  if (!guard.allowed) {
+    console.log(`[ATLAS] Cadence guard blocked: ${guard.reason}`);
+    return {
+      run_id: null,
+      status: "CADENCE_BLOCKED",
+      decision_type: "SKIPPED",
+      reason: guard.reason,
+    };
+  }
   // Create evaluation run
   const { data: runRow } = await supabase.from("evaluation_runs").insert({
     asset_id,
@@ -795,7 +846,7 @@ async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: 
       evaluatedTrades: (tradeResult as any).filled + (tradeResult as any).closed,
       error: null,
       regime: detectedRegime,
-    });
+    }, emittedBy);
 
     // Update run as completed
     await supabase.from("evaluation_runs").update({
@@ -837,7 +888,7 @@ async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: 
       evaluatedTrades: 0,
       error: evalError,
       regime: undefined,
-    });
+    }, emittedBy);
 
     await supabase.from("evaluation_runs").update({
       status: "ERROR",
@@ -909,7 +960,8 @@ serve(async (req) => {
       if (!asset) throw new Error("asset parameter required");
       const horizon = url.searchParams.get("horizon") || undefined;
       const timeframe = url.searchParams.get("timeframe") || "4h";
-      const result = await runFullEvaluation(asset, timeframe, horizon);
+      const emittedBy = url.searchParams.get("emitted_by") || "UNKNOWN";
+      const result = await runFullEvaluation(asset, timeframe, horizon, emittedBy);
       return new Response(JSON.stringify({ data: result }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

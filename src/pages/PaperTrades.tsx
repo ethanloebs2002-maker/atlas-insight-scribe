@@ -210,6 +210,7 @@ export default function PaperTrades() {
                       <TableHead className="text-[10px] font-mono">AGREEMENT</TableHead>
                       <TableHead className="text-[10px] font-mono">REALIZED</TableHead>
                       <TableHead className="text-[10px] font-mono">CORRECT</TableHead>
+                      <TableHead className="text-[10px] font-mono">SOURCE</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -248,10 +249,15 @@ export default function PaperTrades() {
                             <TableCell className="text-[10px] font-mono">{Math.round(asProbability(d.agreement_score, "paper_decisions.agreement_score") * 100)}%</TableCell>
                             <TableCell>{d.realized_dir ? <DirBadge dir={d.realized_dir} /> : <span className="text-[10px] text-muted-foreground font-mono">pending</span>}</TableCell>
                             <TableCell>{d.evaluated_at ? (d.correct ? <CheckCircle2 className="h-3.5 w-3.5 text-bullish" /> : <XCircle className="h-3.5 w-3.5 text-bearish" />) : <Minus className="h-3.5 w-3.5 text-muted-foreground" />}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="text-[8px] font-mono">
+                                {d.emitted_by || "UNKNOWN"}
+                              </Badge>
+                            </TableCell>
                           </TableRow>
                           {isExpanded && (
                             <TableRow key={`${d.id}-chart`}>
-                              <TableCell colSpan={10} className="p-3 bg-secondary/20">
+                              <TableCell colSpan={11} className="p-3 bg-secondary/20">
                                 <DecisionChartWithData
                                   symbol={d.asset_id}
                                   timeframe={d.timeframe || "4h"}

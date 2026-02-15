@@ -155,7 +155,7 @@ serve(async (req) => {
 
           // 3. Call paper-engine evaluate
           const evalRes = await fetch(
-            `${supabaseUrl}/functions/v1/paper-engine?action=evaluate&asset=${asset.asset_id}&timeframe=${timeframe}`,
+            `${supabaseUrl}/functions/v1/paper-engine?action=evaluate&asset=${asset.asset_id}&timeframe=${timeframe}&emitted_by=AUTO_EVAL`,
             {
               headers: {
                 "Content-Type": "application/json",

@@ -57,7 +57,7 @@ export function useEvaluate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ asset, horizon }: { asset: string; horizon?: string }) =>
-      callPaperEngine("evaluate", { asset, ...(horizon ? { horizon } : {}) }),
+      callPaperEngine("evaluate", { asset, ...(horizon ? { horizon } : {}), emitted_by: "MANUAL_EVALUATE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["paper-stats"] }),
   });
 }
