@@ -269,7 +269,22 @@ function generateAnalysis(klines: KlineData[], market: MarketData) {
   if (relativeVol < 0.7) consensus.conflicts.push({ description: "Below-average volume reduces signal reliability", severity: "low" });
   if (regime === "Choppy") consensus.conflicts.push({ description: "Choppy regime degrades directional signals", severity: "medium" });
 
-  return { asset: { symbol: market.symbol, name: market.name, price: market.price, change24h: market.change24h, volume24h: market.volume24h, marketCap: market.marketCap, regime }, scenarios, consensus };
+  // Include raw klines + EMA data for charting
+  const chartData = klines.slice(-60).map((k, i, arr) => {
+    const idx = klines.length - 60 + i;
+    return {
+      time: k.openTime,
+      open: k.open,
+      high: k.high,
+      low: k.low,
+      close: k.close,
+      volume: k.volume,
+      ema20: idx < ema20arr.length ? ema20arr[idx] : null,
+      ema50: idx < ema50arr.length ? ema50arr[idx] : null,
+    };
+  });
+
+  return { asset: { symbol: market.symbol, name: market.name, price: market.price, change24h: market.change24h, volume24h: market.volume24h, marketCap: market.marketCap, regime }, scenarios, consensus, chartData };
 }
 
 serve(async (req) => {

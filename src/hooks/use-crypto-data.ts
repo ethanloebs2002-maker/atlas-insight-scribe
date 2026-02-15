@@ -16,11 +16,23 @@ interface MarketDataResponse {
   timestamp: number;
 }
 
+interface ChartDataPoint {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  ema20: number | null;
+  ema50: number | null;
+}
+
 interface AnalysisResponse {
   data: {
     asset: AssetOverview;
     scenarios: ScenarioData[];
     consensus: ConsensusData;
+    chartData?: ChartDataPoint[];
   };
   source: string;
   timestamp: number;
