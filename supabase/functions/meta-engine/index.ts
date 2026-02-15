@@ -492,9 +492,22 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const action = url.searchParams.get("action") || "dashboard";
-    const asset = url.searchParams.get("asset") || undefined;
-    const tf = url.searchParams.get("timeframe") || "4h";
+    let action = url.searchParams.get("action");
+    let asset = url.searchParams.get("asset") || undefined;
+    let tf = url.searchParams.get("timeframe") || "4h";
+    let bodyData: any = null;
+
+    // Support both query params and body-based action routing
+    if (!action) {
+      try {
+        const cloned = req.clone();
+        bodyData = await cloned.json();
+        action = bodyData.action || "dashboard";
+        asset = bodyData.asset || asset;
+        tf = bodyData.timeframe || tf;
+      } catch { action = "dashboard"; }
+    }
+    action = action || "dashboard";
 
     let result: unknown;
 
@@ -507,21 +520,21 @@ serve(async (req) => {
         result = await getDashboard(asset);
         break;
       case "messages":
-        result = await getAdminMessages(parseInt(url.searchParams.get("limit") || "50"));
+        result = await getAdminMessages(parseInt(url.searchParams.get("limit") || bodyData?.limit || "50"));
         break;
       case "send-message": {
-        const body = await req.json();
+        const body = bodyData || await req.json();
         result = await sendAdminMessage(body.title, body.body, body.category, body.severity);
         break;
       }
       case "mark-read": {
-        const body = await req.json();
+        const body = bodyData || await req.json();
         await markMessageRead(body.id);
         result = { ok: true };
         break;
       }
       case "atlas-respond": {
-        const body = await req.json();
+        const body = bodyData || await req.json();
         result = await atlasRespond(body.message_id, body.asset_id);
         break;
       }
