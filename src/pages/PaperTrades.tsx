@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { usePaperStats } from "@/hooks/use-paper-engine";
 import { asProbability } from "@/types/probability";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,26 +22,20 @@ import RunAnalysisEmptyState from "@/components/RunAnalysisEmptyState";
 import BestTimeframeBadge from "@/components/BestTimeframeBadge";
 import TimeframePerformancePanel from "@/components/TimeframePerformancePanel";
 import DecisionChart, { type Candle } from "@/components/DecisionChart";
-import { useIncorporatedAssets, useAutoEvalTick } from "@/hooks/use-auto-eval";
+import { useIncorporatedAssets, runAutoEvalTick } from "@/hooks/use-auto-eval";
 import { useAssetAnalysis } from "@/hooks/use-crypto-data";
-import { type EvalCadence, CADENCE_OPTIONS, setEvalCadence, getEvalCadence } from "@/lib/eval-cadence";
+import { type EvalCadence, CADENCE_OPTIONS } from "@/lib/eval-cadence";
+import { useAutoEvaluationScheduler } from "@/hooks/use-auto-eval-scheduler";
 
 export default function PaperTrades() {
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [paused, setPaused] = useState(false);
   const [showLearning, setShowLearning] = useState(false);
-  const [evalCadence, setEvalCadenceState] = useState<EvalCadence>(getEvalCadence());
   const [expandedDecisionId, setExpandedDecisionId] = useState<string | null>(null);
   const [expandedTradeId, setExpandedTradeId] = useState<string | null>(null);
 
-  // Auto-eval tick driven by cadence
-  useAutoEvalTick(!paused && !!selectedAsset, evalCadence);
-
-  const handleCadenceChange = useCallback((v: string) => {
-    const cadence = v as EvalCadence;
-    setEvalCadenceState(cadence);
-    setEvalCadence(cadence);
-  }, []);
+  // Single auto-eval scheduler
+  const sched = useAutoEvaluationScheduler(runAutoEvalTick, !paused && !!selectedAsset);
   const { data: assetsRes } = useIncorporatedAssets();
   const incorporatedAssets = (assetsRes?.data || []) as { asset_id: string; symbol: string; is_enabled: boolean }[];
   const ASSETS = incorporatedAssets.length > 0
@@ -89,6 +83,7 @@ export default function PaperTrades() {
             <BestTimeframeBadge asset={selectedAsset} />
           </div>
           <p className="text-xs font-mono text-muted-foreground">Simulation Console • Track B + C Evaluation</p>
+          <p className="text-[9px] font-mono text-muted-foreground/60">Auto-eval: {sched.cadence} | Last: {sched.lastRunAt} | Runs: {sched.runCount}</p>
         </div>
         <div className="flex items-center gap-2">
           <Select value={selectedAsset || "all"} onValueChange={(v) => setSelectedAsset(v === "all" ? undefined : v)}>
@@ -103,7 +98,7 @@ export default function PaperTrades() {
           {/* Cadence selector */}
           <div className="flex items-center gap-1.5">
             <Gauge className="h-3 w-3 text-muted-foreground" />
-            <Select value={evalCadence} onValueChange={handleCadenceChange}>
+            <Select value={sched.cadence} onValueChange={(v) => sched.setCadence(v as EvalCadence)}>
               <SelectTrigger className="w-24 h-8 text-xs font-mono">
                 <SelectValue />
               </SelectTrigger>

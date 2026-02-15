@@ -1,11 +1,13 @@
 export type EvalCadence = "1m" | "5m" | "10m" | "20m" | "1h";
 
+const VALID_CADENCES: readonly EvalCadence[] = ["1m", "5m", "10m", "20m", "1h"] as const;
+
 export const CADENCE_MS: Record<EvalCadence, number> = {
   "1m": 60_000,
-  "5m": 5 * 60_000,
-  "10m": 10 * 60_000,
-  "20m": 20 * 60_000,
-  "1h": 60 * 60_000,
+  "5m": 300_000,
+  "10m": 600_000,
+  "20m": 1_200_000,
+  "1h": 3_600_000,
 };
 
 export const CADENCE_OPTIONS: { value: EvalCadence; label: string }[] = [
@@ -16,14 +18,25 @@ export const CADENCE_OPTIONS: { value: EvalCadence; label: string }[] = [
   { value: "1h", label: "1 hour" },
 ];
 
-export function getEvalCadence(): EvalCadence {
-  if (typeof window !== "undefined" && (window as any).__ATLAS_EVAL_CADENCE) {
-    const val = (window as any).__ATLAS_EVAL_CADENCE as string;
-    if (val in CADENCE_MS) return val as EvalCadence;
+const CADENCE_KEY = "ATLAS_EVAL_CADENCE";
+
+export function readEvalCadence(): EvalCadence {
+  try {
+    const raw = (localStorage.getItem(CADENCE_KEY) || "5m").trim() as EvalCadence;
+    return VALID_CADENCES.includes(raw) ? raw : "5m";
+  } catch {
+    return "5m";
   }
-  return "5m";
 }
 
-export function setEvalCadence(cadence: EvalCadence): void {
-  (window as any).__ATLAS_EVAL_CADENCE = cadence;
+export function writeEvalCadence(v: EvalCadence): void {
+  try {
+    localStorage.setItem(CADENCE_KEY, v);
+  } catch {
+    // storage unavailable
+  }
 }
+
+// Legacy compat — kept for any remaining callers but localStorage is source of truth
+export const getEvalCadence = readEvalCadence;
+export const setEvalCadence = writeEvalCadence;
