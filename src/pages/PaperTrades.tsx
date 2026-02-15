@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft, BarChart3, Sparkles, Search, ShieldAlert, Scan } from "lucide-react";
+import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft, BarChart3, Sparkles, Search, ShieldAlert, Scan, Timer } from "lucide-react";
 import LearningSourcesPanel from "@/components/LearningSourcesPanel";
 import IndicatorBreakdownPanel from "@/components/IndicatorBreakdownPanel";
 import IndicatorReliabilityPanel from "@/components/IndicatorReliabilityPanel";
@@ -18,13 +18,19 @@ import PatternTierPanel from "@/components/PatternTierPanel";
 import AnomalyPanel from "@/components/AnomalyPanel";
 import EvaluateButton from "@/components/EvaluateButton";
 import RunAnalysisEmptyState from "@/components/RunAnalysisEmptyState";
-
-const ASSETS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
+import BestTimeframeBadge from "@/components/BestTimeframeBadge";
+import TimeframePerformancePanel from "@/components/TimeframePerformancePanel";
+import { useIncorporatedAssets } from "@/hooks/use-auto-eval";
 
 export default function PaperTrades() {
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [paused, setPaused] = useState(false);
   const [showLearning, setShowLearning] = useState(false);
+  const { data: assetsRes } = useIncorporatedAssets();
+  const incorporatedAssets = (assetsRes?.data || []) as { asset_id: string; symbol: string; is_enabled: boolean }[];
+  const ASSETS = incorporatedAssets.length > 0
+    ? incorporatedAssets.filter(a => a.is_enabled).map(a => a.asset_id)
+    : ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
   const { data: statsRes, isLoading } = usePaperStats(selectedAsset, true);
 
   const stats = statsRes?.data;
@@ -61,7 +67,10 @@ export default function PaperTrades() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-mono font-bold tracking-wider text-primary">PAPER TRADES</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-mono font-bold tracking-wider text-primary">PAPER TRADES</h1>
+            <BestTimeframeBadge asset={selectedAsset} />
+          </div>
           <p className="text-xs font-mono text-muted-foreground">Simulation Console • Track B + C Evaluation</p>
         </div>
         <div className="flex items-center gap-2">
@@ -130,6 +139,10 @@ export default function PaperTrades() {
           <TabsTrigger value="anomalies" className="text-xs gap-1">
             <Scan className="h-3 w-3" />
             Anomalies
+          </TabsTrigger>
+          <TabsTrigger value="tf-performance" className="text-xs gap-1">
+            <Timer className="h-3 w-3" />
+            TF Performance
           </TabsTrigger>
         </TabsList>
 
@@ -488,6 +501,11 @@ export default function PaperTrades() {
         {/* ─── ANOMALIES ─────────────────────────────────────── */}
         <TabsContent value="anomalies">
           <AnomalyPanel selectedAsset={selectedAsset} />
+        </TabsContent>
+
+        {/* ─── TIMEFRAME PERFORMANCE ──────────────────────────── */}
+        <TabsContent value="tf-performance">
+          <TimeframePerformancePanel asset={selectedAsset} />
         </TabsContent>
       </Tabs>
     </div>

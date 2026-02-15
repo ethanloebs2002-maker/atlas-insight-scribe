@@ -11,7 +11,7 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const VERSION_TAG = "v1.8.4";
+const VERSION_TAG = "v1.8.5";
 
 // ─── GRADUATION THRESHOLDS ────────────────────────────────────────
 const GRADUATION_GATES = {
@@ -605,6 +605,15 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
   if (asset_id) lastRunQuery = lastRunQuery.eq("asset_id", asset_id);
   const { data: lastRunData } = await lastRunQuery;
 
+  // Fetch timeframe stats for this asset
+  let tfStatsQuery = supabase.from("timeframe_stats").select("*").order("success_likelihood_score", { ascending: false });
+  if (asset_id) tfStatsQuery = tfStatsQuery.eq("asset_id", asset_id);
+  const { data: tfStatsData } = await tfStatsQuery;
+
+  // Get best timeframe
+  const matureTfs = (tfStatsData || []).filter(t => (t.trades_n || 0) >= 30);
+  const bestTf = matureTfs.length > 0 ? matureTfs[0].timeframe : null;
+
   return {
     decisions: decisions.data || [],
     trades: trades.data || [],
@@ -613,6 +622,8 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     maeDistribution,
     bhHorizonStats,
     lastRun: lastRunData?.[0] || null,
+    timeframeStats: tfStatsData || [],
+    bestTimeframe: bestTf,
     config: {
       publicHorizons: PUBLIC_HORIZONS,
       learningHorizons: LEARNING_HORIZONS,
