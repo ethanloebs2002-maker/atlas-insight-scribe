@@ -35,7 +35,7 @@ export default function ScenarioCard({ scenario }: { scenario: ScenarioData }) {
         </div>
         <div className="flex items-center gap-2">
           <span className={cn('font-mono text-lg font-bold', scenarioColor(scenario.type))}>
-            {scenario.probability}%
+            {Math.round(scenario.probability * 100)}%
           </span>
           <span className={cn(
             'text-[10px] font-mono px-1.5 py-0.5 rounded border',
@@ -50,7 +50,7 @@ export default function ScenarioCard({ scenario }: { scenario: ScenarioData }) {
       <div className="h-1 rounded-full bg-secondary mb-4">
         <div
           className={cn('h-full rounded-full transition-all', scenario.type === 'bullish' ? 'bg-bullish' : scenario.type === 'bearish' ? 'bg-bearish' : 'bg-neutral-signal')}
-          style={{ width: `${scenario.probability}%` }}
+          style={{ width: `${scenario.probability * 100}%` }}
         />
       </div>
 

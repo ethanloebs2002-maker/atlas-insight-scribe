@@ -81,9 +81,9 @@ export default function IndicatorBreakdownPanel({ decisions }: Props) {
                 <CardTitle className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Integrity at Decision Time</CardTitle>
               </CardHeader>
               <CardContent className="grid grid-cols-3 gap-3">
-                <MiniCard label="Completeness" value={`${(Number(integrity.completeness_score) * 100).toFixed(0)}%`} />
-                <MiniCard label="Consensus" value={`${(Number(integrity.consensus_score) * 100).toFixed(0)}%`} />
-                <MiniCard label="Agreement" value={`${(Number(integrity.agreement_score) * 100).toFixed(0)}%`} />
+                <MiniCard label="Completeness" value={`${Math.round(Number(integrity.completeness_score) * 100)}%`} />
+                <MiniCard label="Consensus" value={`${Math.round(Number(integrity.consensus_score) * 100)}%`} />
+                <MiniCard label="Agreement" value={`${Math.round(Number(integrity.agreement_score) * 100)}%`} />
               </CardContent>
             </Card>
           )}

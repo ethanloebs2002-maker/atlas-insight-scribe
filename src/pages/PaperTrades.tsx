@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { usePaperStats } from "@/hooks/use-paper-engine";
+import { asProbability } from "@/types/probability";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -177,10 +178,10 @@ export default function PaperTrades() {
                         <TableCell className="text-[10px] font-mono text-muted-foreground">{new Date(d.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</TableCell>
                         <TableCell className="text-[10px] font-mono font-bold">{d.asset_id}</TableCell>
                         <TableCell><DirBadge dir={d.direction_pred} /></TableCell>
-                        <TableCell className="text-[10px] font-mono">{(d.probability_pred * 100).toFixed(0)}%</TableCell>
+                        <TableCell className="text-[10px] font-mono">{Math.round(asProbability(d.probability_pred, "paper_decisions.probability_pred") * 100)}%</TableCell>
                         <TableCell className="text-[10px] font-mono">${Number(d.ref_price).toLocaleString()}</TableCell>
                         <TableCell><Badge variant="secondary" className="text-[9px] font-mono">{d.horizon}</Badge></TableCell>
-                        <TableCell className="text-[10px] font-mono">{(d.agreement_score * 100).toFixed(0)}%</TableCell>
+                        <TableCell className="text-[10px] font-mono">{Math.round(asProbability(d.agreement_score, "paper_decisions.agreement_score") * 100)}%</TableCell>
                         <TableCell>{d.realized_dir ? <DirBadge dir={d.realized_dir} /> : <span className="text-[10px] text-muted-foreground font-mono">pending</span>}</TableCell>
                         <TableCell>{d.evaluated_at ? (d.correct ? <CheckCircle2 className="h-3.5 w-3.5 text-bullish" /> : <XCircle className="h-3.5 w-3.5 text-bearish" />) : <Minus className="h-3.5 w-3.5 text-muted-foreground" />}</TableCell>
                       </TableRow>
