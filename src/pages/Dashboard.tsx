@@ -31,7 +31,7 @@ export default function Dashboard() {
         )}
         {!isLoading && !isError && analysis && (
           <div className="text-[10px] font-mono text-primary/60">
-            ● LIVE — CoinGecko + Binance • Auto-refresh 2m
+            ● LIVE — CryptoCompare • Auto-refresh 2m
           </div>
         )}
         {isError && (
