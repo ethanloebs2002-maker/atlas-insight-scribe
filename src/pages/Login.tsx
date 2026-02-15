@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,9 +11,16 @@ import { Activity, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Login() {
+  const { session, isLoading: authLoading } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Redirect if already logged in
+  if (!authLoading && session) {
+    return <Navigate to="/" replace />;
+  }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -19,6 +28,8 @@ export default function Login() {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       toast.error(error.message);
+    } else {
+      navigate("/", { replace: true });
     }
     setLoading(false);
   }
