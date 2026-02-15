@@ -58,12 +58,13 @@ export default function Dashboard() {
           <AssetHeader asset={asset} />
 
           {/* Advanced Chart with indicators & ATLAS overlays */}
-          {analysis?.chartData && analysis.chartData.length > 0 && (
+          {(analysis?.chartData?.length || isLoading) && (
             <AdvancedChart
-              data={analysis.chartData}
+              data={analysis?.chartData || []}
               symbol={asset.symbol}
               timeframe={timeframe}
               onTimeframeChange={setTimeframe}
+              isLoading={isLoading}
               entryZones={bullScenario?.entryZones?.map(ez => ({ low: ez.priceRange[0], high: ez.priceRange[1] }))}
               stopLevel={bullScenario?.stopLoss?.level}
               targets={bullScenario?.targets?.map(t => ({ price: t.price, label: t.label }))}
