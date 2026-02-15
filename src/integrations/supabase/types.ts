@@ -352,6 +352,522 @@ export type Database = {
           },
         ]
       }
+      news_agenda_signals: {
+        Row: {
+          agenda_uncertainty: number
+          clickbait_intensity: number
+          created_at: string
+          framing_asymmetry: number
+          id: string
+          incentive_flags_json: Json | null
+          news_id: string
+          source_disagreement: number
+          speculation_level: number
+        }
+        Insert: {
+          agenda_uncertainty?: number
+          clickbait_intensity?: number
+          created_at?: string
+          framing_asymmetry?: number
+          id?: string
+          incentive_flags_json?: Json | null
+          news_id: string
+          source_disagreement?: number
+          speculation_level?: number
+        }
+        Update: {
+          agenda_uncertainty?: number
+          clickbait_intensity?: number
+          created_at?: string
+          framing_asymmetry?: number
+          id?: string
+          incentive_flags_json?: Json | null
+          news_id?: string
+          source_disagreement?: number
+          speculation_level?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "news_agenda_signals_news_id_fkey"
+            columns: ["news_id"]
+            isOneToOne: true
+            referencedRelation: "news_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      news_asset_links: {
+        Row: {
+          asset_id: string
+          created_at: string
+          id: string
+          link_confidence: number
+          news_id: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          id?: string
+          link_confidence?: number
+          news_id: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          id?: string
+          link_confidence?: number
+          news_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "news_asset_links_news_id_fkey"
+            columns: ["news_id"]
+            isOneToOne: false
+            referencedRelation: "news_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      news_corroboration: {
+        Row: {
+          computed_at: string
+          corroboration_score: number
+          created_at: string
+          disagreement_score: number
+          id: string
+          narrative_id: string
+          sources_count: number
+          tier_a_sources_count: number
+        }
+        Insert: {
+          computed_at?: string
+          corroboration_score?: number
+          created_at?: string
+          disagreement_score?: number
+          id?: string
+          narrative_id: string
+          sources_count?: number
+          tier_a_sources_count?: number
+        }
+        Update: {
+          computed_at?: string
+          corroboration_score?: number
+          created_at?: string
+          disagreement_score?: number
+          id?: string
+          narrative_id?: string
+          sources_count?: number
+          tier_a_sources_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "news_corroboration_narrative_id_fkey"
+            columns: ["narrative_id"]
+            isOneToOne: false
+            referencedRelation: "news_narratives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      news_feature_rows: {
+        Row: {
+          agenda_signals_json: Json | null
+          asset_id: string
+          corroboration_score: number
+          created_at: string
+          engine_state_snapshot_json: Json | null
+          event_labels_json: Json | null
+          id: string
+          liquidity_tier: string | null
+          market_reaction_labels_json: Json | null
+          narrative_id: string | null
+          news_id: string
+          psych_impact_json: Json | null
+          regime_label: string
+          source_reliability: number
+          timeframe_class: string
+          vol_band: string | null
+        }
+        Insert: {
+          agenda_signals_json?: Json | null
+          asset_id: string
+          corroboration_score?: number
+          created_at?: string
+          engine_state_snapshot_json?: Json | null
+          event_labels_json?: Json | null
+          id?: string
+          liquidity_tier?: string | null
+          market_reaction_labels_json?: Json | null
+          narrative_id?: string | null
+          news_id: string
+          psych_impact_json?: Json | null
+          regime_label?: string
+          source_reliability?: number
+          timeframe_class?: string
+          vol_band?: string | null
+        }
+        Update: {
+          agenda_signals_json?: Json | null
+          asset_id?: string
+          corroboration_score?: number
+          created_at?: string
+          engine_state_snapshot_json?: Json | null
+          event_labels_json?: Json | null
+          id?: string
+          liquidity_tier?: string | null
+          market_reaction_labels_json?: Json | null
+          narrative_id?: string | null
+          news_id?: string
+          psych_impact_json?: Json | null
+          regime_label?: string
+          source_reliability?: number
+          timeframe_class?: string
+          vol_band?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "news_feature_rows_narrative_id_fkey"
+            columns: ["narrative_id"]
+            isOneToOne: false
+            referencedRelation: "news_narratives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "news_feature_rows_news_id_fkey"
+            columns: ["news_id"]
+            isOneToOne: false
+            referencedRelation: "news_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      news_graduation: {
+        Row: {
+          agenda_penalty_applied: boolean
+          asset_id: string
+          created_at: string
+          dir_acc_uplift: number | null
+          ev_uplift: number | null
+          graduation_level: number
+          id: string
+          influence_mode: string
+          integrity_pass: boolean
+          last_evaluated_at: string | null
+          n_linked_events: number
+          n_trades_in_news_state: number
+          regime_label: string
+          stability_recent: number | null
+          timeframe_class: string
+          updated_at: string
+        }
+        Insert: {
+          agenda_penalty_applied?: boolean
+          asset_id: string
+          created_at?: string
+          dir_acc_uplift?: number | null
+          ev_uplift?: number | null
+          graduation_level?: number
+          id?: string
+          influence_mode?: string
+          integrity_pass?: boolean
+          last_evaluated_at?: string | null
+          n_linked_events?: number
+          n_trades_in_news_state?: number
+          regime_label?: string
+          stability_recent?: number | null
+          timeframe_class?: string
+          updated_at?: string
+        }
+        Update: {
+          agenda_penalty_applied?: boolean
+          asset_id?: string
+          created_at?: string
+          dir_acc_uplift?: number | null
+          ev_uplift?: number | null
+          graduation_level?: number
+          id?: string
+          influence_mode?: string
+          integrity_pass?: boolean
+          last_evaluated_at?: string | null
+          n_linked_events?: number
+          n_trades_in_news_state?: number
+          regime_label?: string
+          stability_recent?: number | null
+          timeframe_class?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      news_items: {
+        Row: {
+          canonical_url: string | null
+          categories_json: Json | null
+          created_at: string
+          dedupe_hash: string | null
+          external_id: string | null
+          id: string
+          ingested_at: string
+          published_at: string
+          publisher: string | null
+          raw_metadata_json: Json | null
+          snippet: string | null
+          source_id: string | null
+          title: string
+        }
+        Insert: {
+          canonical_url?: string | null
+          categories_json?: Json | null
+          created_at?: string
+          dedupe_hash?: string | null
+          external_id?: string | null
+          id?: string
+          ingested_at?: string
+          published_at?: string
+          publisher?: string | null
+          raw_metadata_json?: Json | null
+          snippet?: string | null
+          source_id?: string | null
+          title: string
+        }
+        Update: {
+          canonical_url?: string | null
+          categories_json?: Json | null
+          created_at?: string
+          dedupe_hash?: string | null
+          external_id?: string | null
+          id?: string
+          ingested_at?: string
+          published_at?: string
+          publisher?: string | null
+          raw_metadata_json?: Json | null
+          snippet?: string | null
+          source_id?: string | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "news_items_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "news_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      news_market_reactions: {
+        Row: {
+          abnormality_score: number
+          asset_id: string
+          base_ts: string
+          computed_at: string
+          created_at: string
+          horizon_metrics_json: Json
+          id: string
+          news_id: string
+          reaction_confidence: number
+          regime_label: string
+        }
+        Insert: {
+          abnormality_score?: number
+          asset_id: string
+          base_ts: string
+          computed_at?: string
+          created_at?: string
+          horizon_metrics_json?: Json
+          id?: string
+          news_id: string
+          reaction_confidence?: number
+          regime_label?: string
+        }
+        Update: {
+          abnormality_score?: number
+          asset_id?: string
+          base_ts?: string
+          computed_at?: string
+          created_at?: string
+          horizon_metrics_json?: Json
+          id?: string
+          news_id?: string
+          reaction_confidence?: number
+          regime_label?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "news_market_reactions_news_id_fkey"
+            columns: ["news_id"]
+            isOneToOne: false
+            referencedRelation: "news_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      news_narrative_links: {
+        Row: {
+          created_at: string
+          id: string
+          narrative_id: string
+          news_id: string
+          relevance_score: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          narrative_id: string
+          news_id: string
+          relevance_score?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          narrative_id?: string
+          news_id?: string
+          relevance_score?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "news_narrative_links_narrative_id_fkey"
+            columns: ["narrative_id"]
+            isOneToOne: false
+            referencedRelation: "news_narratives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "news_narrative_links_news_id_fkey"
+            columns: ["news_id"]
+            isOneToOne: false
+            referencedRelation: "news_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      news_narratives: {
+        Row: {
+          article_count: number
+          asset_id: string
+          created_at: string
+          first_seen_ts: string
+          id: string
+          is_active: boolean
+          last_seen_ts: string
+          momentum_24h: number
+          momentum_7d: number
+          topic_embedding: Json | null
+          topic_label: string
+        }
+        Insert: {
+          article_count?: number
+          asset_id: string
+          created_at?: string
+          first_seen_ts?: string
+          id?: string
+          is_active?: boolean
+          last_seen_ts?: string
+          momentum_24h?: number
+          momentum_7d?: number
+          topic_embedding?: Json | null
+          topic_label: string
+        }
+        Update: {
+          article_count?: number
+          asset_id?: string
+          created_at?: string
+          first_seen_ts?: string
+          id?: string
+          is_active?: boolean
+          last_seen_ts?: string
+          momentum_24h?: number
+          momentum_7d?: number
+          topic_embedding?: Json | null
+          topic_label?: string
+        }
+        Relationships: []
+      }
+      news_psych_impact: {
+        Row: {
+          authority_score: number
+          contagion_score: number
+          created_at: string
+          extraction_confidence: number
+          extraction_method: string
+          fear_score: number
+          greed_fomo_score: number
+          id: string
+          narrative_pressure_score: number
+          news_id: string
+          outrage_conflict_score: number
+          uncertainty_score: number
+          urgency_score: number
+        }
+        Insert: {
+          authority_score?: number
+          contagion_score?: number
+          created_at?: string
+          extraction_confidence?: number
+          extraction_method?: string
+          fear_score?: number
+          greed_fomo_score?: number
+          id?: string
+          narrative_pressure_score?: number
+          news_id: string
+          outrage_conflict_score?: number
+          uncertainty_score?: number
+          urgency_score?: number
+        }
+        Update: {
+          authority_score?: number
+          contagion_score?: number
+          created_at?: string
+          extraction_confidence?: number
+          extraction_method?: string
+          fear_score?: number
+          greed_fomo_score?: number
+          id?: string
+          narrative_pressure_score?: number
+          news_id?: string
+          outrage_conflict_score?: number
+          uncertainty_score?: number
+          urgency_score?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "news_psych_impact_news_id_fkey"
+            columns: ["news_id"]
+            isOneToOne: true
+            referencedRelation: "news_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      news_sources: {
+        Row: {
+          created_at: string
+          domain: string | null
+          id: string
+          name: string
+          reliability_weight: number
+          tier: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          domain?: string | null
+          id?: string
+          name: string
+          reliability_weight?: number
+          tier?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          domain?: string | null
+          id?: string
+          name?: string
+          reliability_weight?: number
+          tier?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       paper_decisions: {
         Row: {
           agreement_score: number
