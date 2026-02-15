@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      asset_fingerprints: {
+        Row: {
+          asset_id: string
+          atr_normalized: number
+          computed_at: string
+          correlation_btc: number
+          fingerprint_vector: Json
+          id: string
+          macd_trend: number
+          mean_reversion_score: number
+          momentum_score: number
+          regime_label: string
+          rsi_avg: number
+          timeframe: string
+          trend_strength: number
+          volatility_rank: number
+          volume_profile: number
+        }
+        Insert: {
+          asset_id: string
+          atr_normalized?: number
+          computed_at?: string
+          correlation_btc?: number
+          fingerprint_vector?: Json
+          id?: string
+          macd_trend?: number
+          mean_reversion_score?: number
+          momentum_score?: number
+          regime_label?: string
+          rsi_avg?: number
+          timeframe?: string
+          trend_strength?: number
+          volatility_rank?: number
+          volume_profile?: number
+        }
+        Update: {
+          asset_id?: string
+          atr_normalized?: number
+          computed_at?: string
+          correlation_btc?: number
+          fingerprint_vector?: Json
+          id?: string
+          macd_trend?: number
+          mean_reversion_score?: number
+          momentum_score?: number
+          regime_label?: string
+          rsi_avg?: number
+          timeframe?: string
+          trend_strength?: number
+          volatility_rank?: number
+          volume_profile?: number
+        }
+        Relationships: []
+      }
       graduation_status: {
         Row: {
           asset_id: string
@@ -220,12 +274,99 @@ export type Database = {
           },
         ]
       }
+      transfer_priors: {
+        Row: {
+          atr_sizing_json: Json | null
+          calibration_shape_json: Json | null
+          contradiction_count: number
+          created_at: string
+          current_local_decisions: number
+          discard_reason: string | null
+          discarded: boolean
+          donor_asset: string
+          id: string
+          initial_transfer_weight: number
+          integrity_pass: boolean
+          last_decay_at: string
+          local_decisions_at_transfer: number
+          regime_map_json: Json | null
+          signal_weights_json: Json | null
+          similarity_score: number
+          target_asset: string
+          timeframe: string
+          transfer_weight: number
+          updated_at: string
+        }
+        Insert: {
+          atr_sizing_json?: Json | null
+          calibration_shape_json?: Json | null
+          contradiction_count?: number
+          created_at?: string
+          current_local_decisions?: number
+          discard_reason?: string | null
+          discarded?: boolean
+          donor_asset: string
+          id?: string
+          initial_transfer_weight?: number
+          integrity_pass?: boolean
+          last_decay_at?: string
+          local_decisions_at_transfer?: number
+          regime_map_json?: Json | null
+          signal_weights_json?: Json | null
+          similarity_score?: number
+          target_asset: string
+          timeframe?: string
+          transfer_weight?: number
+          updated_at?: string
+        }
+        Update: {
+          atr_sizing_json?: Json | null
+          calibration_shape_json?: Json | null
+          contradiction_count?: number
+          created_at?: string
+          current_local_decisions?: number
+          discard_reason?: string | null
+          discarded?: boolean
+          donor_asset?: string
+          id?: string
+          initial_transfer_weight?: number
+          integrity_pass?: boolean
+          last_decay_at?: string
+          local_decisions_at_transfer?: number
+          regime_map_json?: Json | null
+          signal_weights_json?: Json | null
+          similarity_score?: number
+          target_asset?: string
+          timeframe?: string
+          transfer_weight?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      compute_transfer_decay: {
+        Args: {
+          current_local_decisions: number
+          half_life?: number
+          initial_weight: number
+          local_decisions_at_transfer: number
+        }
+        Returns: number
+      }
+      cosine_similarity: { Args: { a: Json; b: Json }; Returns: number }
+      find_similar_assets: {
+        Args: { p_asset_id: string; p_threshold?: number; p_timeframe?: string }
+        Returns: {
+          asset_id: string
+          graduation_level: number
+          is_stable: boolean
+          similarity: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

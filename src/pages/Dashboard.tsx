@@ -6,7 +6,7 @@ import ScenarioCard from '@/components/ScenarioCard';
 import ConsensusReport from '@/components/ConsensusReport';
 import EvidenceTable from '@/components/EvidenceTable';
 import WhaleTable from '@/components/WhaleTable';
-import CandlestickChart from '@/components/CandlestickChart';
+import AdvancedChart from '@/components/AdvancedChart';
 import { Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -55,9 +55,15 @@ export default function Dashboard() {
         <>
           <AssetHeader asset={asset} />
 
-          {/* Candlestick Chart */}
+          {/* Advanced Chart with indicators & ATLAS overlays */}
           {analysis?.chartData && analysis.chartData.length > 0 && (
-            <CandlestickChart data={analysis.chartData} symbol={asset.symbol} />
+            <AdvancedChart
+              data={analysis.chartData}
+              symbol={asset.symbol}
+              entryZones={bullScenario?.entryZones?.map(ez => ({ low: ez.priceRange[0], high: ez.priceRange[1] }))}
+              stopLevel={bullScenario?.stopLoss?.level}
+              targets={bullScenario?.targets?.map(t => ({ price: t.price, label: t.label }))}
+            />
           )}
 
           {/* Scenarios */}
