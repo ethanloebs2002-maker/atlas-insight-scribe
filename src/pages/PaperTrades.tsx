@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { usePaperStats } from "@/hooks/use-paper-engine";
 import { asProbability } from "@/types/probability";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft, BarChart3, Sparkles, Search, ShieldAlert, Scan, Timer } from "lucide-react";
+import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft, BarChart3, Sparkles, Search, ShieldAlert, Scan, Timer, LineChart, ChevronDown, ChevronRight, Gauge } from "lucide-react";
 import LearningSourcesPanel from "@/components/LearningSourcesPanel";
 import IndicatorBreakdownPanel from "@/components/IndicatorBreakdownPanel";
 import IndicatorReliabilityPanel from "@/components/IndicatorReliabilityPanel";
@@ -21,12 +21,25 @@ import EvaluateButton from "@/components/EvaluateButton";
 import RunAnalysisEmptyState from "@/components/RunAnalysisEmptyState";
 import BestTimeframeBadge from "@/components/BestTimeframeBadge";
 import TimeframePerformancePanel from "@/components/TimeframePerformancePanel";
-import { useIncorporatedAssets } from "@/hooks/use-auto-eval";
+import DecisionChart from "@/components/DecisionChart";
+import { useIncorporatedAssets, useAutoEvalTick } from "@/hooks/use-auto-eval";
+import { type EvalCadence, CADENCE_OPTIONS, setEvalCadence, getEvalCadence } from "@/lib/eval-cadence";
 
 export default function PaperTrades() {
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [paused, setPaused] = useState(false);
   const [showLearning, setShowLearning] = useState(false);
+  const [evalCadence, setEvalCadenceState] = useState<EvalCadence>(getEvalCadence());
+  const [expandedDecisionId, setExpandedDecisionId] = useState<string | null>(null);
+
+  // Auto-eval tick driven by cadence
+  useAutoEvalTick(!paused && !!selectedAsset, evalCadence);
+
+  const handleCadenceChange = useCallback((v: string) => {
+    const cadence = v as EvalCadence;
+    setEvalCadenceState(cadence);
+    setEvalCadence(cadence);
+  }, []);
   const { data: assetsRes } = useIncorporatedAssets();
   const incorporatedAssets = (assetsRes?.data || []) as { asset_id: string; symbol: string; is_enabled: boolean }[];
   const ASSETS = incorporatedAssets.length > 0
@@ -85,6 +98,20 @@ export default function PaperTrades() {
               {ASSETS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
             </SelectContent>
           </Select>
+          {/* Cadence selector */}
+          <div className="flex items-center gap-1.5">
+            <Gauge className="h-3 w-3 text-muted-foreground" />
+            <Select value={evalCadence} onValueChange={handleCadenceChange}>
+              <SelectTrigger className="w-24 h-8 text-xs font-mono">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CADENCE_OPTIONS.map(o => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <Button variant="outline" size="sm" className="h-8 text-xs font-mono gap-1.5" onClick={() => setPaused(!paused)}>
             {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
             {paused ? "Resume" : "Pause"}
@@ -161,6 +188,7 @@ export default function PaperTrades() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="text-[10px] font-mono w-8"></TableHead>
                       <TableHead className="text-[10px] font-mono">TIME</TableHead>
                       <TableHead className="text-[10px] font-mono">ASSET</TableHead>
                       <TableHead className="text-[10px] font-mono">PRED</TableHead>
@@ -173,19 +201,56 @@ export default function PaperTrades() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {decisions.slice(0, 50).map((d: any) => (
-                      <TableRow key={d.id}>
-                        <TableCell className="text-[10px] font-mono text-muted-foreground">{new Date(d.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</TableCell>
-                        <TableCell className="text-[10px] font-mono font-bold">{d.asset_id}</TableCell>
-                        <TableCell><DirBadge dir={d.direction_pred} /></TableCell>
-                        <TableCell className="text-[10px] font-mono">{Math.round(asProbability(d.probability_pred, "paper_decisions.probability_pred") * 100)}%</TableCell>
-                        <TableCell className="text-[10px] font-mono">${Number(d.ref_price).toLocaleString()}</TableCell>
-                        <TableCell><Badge variant="secondary" className="text-[9px] font-mono">{d.horizon}</Badge></TableCell>
-                        <TableCell className="text-[10px] font-mono">{Math.round(asProbability(d.agreement_score, "paper_decisions.agreement_score") * 100)}%</TableCell>
-                        <TableCell>{d.realized_dir ? <DirBadge dir={d.realized_dir} /> : <span className="text-[10px] text-muted-foreground font-mono">pending</span>}</TableCell>
-                        <TableCell>{d.evaluated_at ? (d.correct ? <CheckCircle2 className="h-3.5 w-3.5 text-bullish" /> : <XCircle className="h-3.5 w-3.5 text-bearish" />) : <Minus className="h-3.5 w-3.5 text-muted-foreground" />}</TableCell>
-                      </TableRow>
-                    ))}
+                    {decisions.slice(0, 50).map((d: any) => {
+                      const isExpanded = expandedDecisionId === d.id;
+                      const evidence = d.evidence_snapshot_json || {};
+                      const entryPrice = Number(d.ref_price);
+                      const stopLoss = evidence.stopLoss?.level
+                        ? Number(evidence.stopLoss.level)
+                        : entryPrice * (d.direction_pred === "UP" ? 0.97 : 1.03);
+                      const takeProfit = evidence.targets?.[0]?.price
+                        ? Number(evidence.targets[0].price)
+                        : entryPrice * (d.direction_pred === "UP" ? 1.05 : 0.95);
+
+                      return (
+                        <>
+                          <TableRow
+                            key={d.id}
+                            className="cursor-pointer hover:bg-secondary/50"
+                            onClick={() => setExpandedDecisionId(isExpanded ? null : d.id)}
+                          >
+                            <TableCell className="px-2">
+                              {isExpanded
+                                ? <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                                : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+                            </TableCell>
+                            <TableCell className="text-[10px] font-mono text-muted-foreground">{new Date(d.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</TableCell>
+                            <TableCell className="text-[10px] font-mono font-bold">{d.asset_id}</TableCell>
+                            <TableCell><DirBadge dir={d.direction_pred} /></TableCell>
+                            <TableCell className="text-[10px] font-mono">{Math.round(asProbability(d.probability_pred, "paper_decisions.probability_pred") * 100)}%</TableCell>
+                            <TableCell className="text-[10px] font-mono">${Number(d.ref_price).toLocaleString()}</TableCell>
+                            <TableCell><Badge variant="secondary" className="text-[9px] font-mono">{d.horizon}</Badge></TableCell>
+                            <TableCell className="text-[10px] font-mono">{Math.round(asProbability(d.agreement_score, "paper_decisions.agreement_score") * 100)}%</TableCell>
+                            <TableCell>{d.realized_dir ? <DirBadge dir={d.realized_dir} /> : <span className="text-[10px] text-muted-foreground font-mono">pending</span>}</TableCell>
+                            <TableCell>{d.evaluated_at ? (d.correct ? <CheckCircle2 className="h-3.5 w-3.5 text-bullish" /> : <XCircle className="h-3.5 w-3.5 text-bearish" />) : <Minus className="h-3.5 w-3.5 text-muted-foreground" />}</TableCell>
+                          </TableRow>
+                          {isExpanded && (
+                            <TableRow key={`${d.id}-chart`}>
+                              <TableCell colSpan={10} className="p-3 bg-secondary/20">
+                                <DecisionChart
+                                  symbol={d.asset_id}
+                                  timeframe={d.timeframe || "4h"}
+                                  entry={entryPrice}
+                                  stopLoss={stopLoss}
+                                  takeProfit={takeProfit}
+                                  refPrice={entryPrice}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>
