@@ -7,6 +7,7 @@ import AppLayout from "@/components/AppLayout";
 import AssetSearch from "@/pages/AssetSearch";
 import Dashboard from "@/pages/Dashboard";
 import WhaleWatch from "@/pages/WhaleWatch";
+import PaperTrades from "@/pages/PaperTrades";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,6 +23,7 @@ const App = () => (
             <Route path="/" element={<AssetSearch />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/whale-watch" element={<WhaleWatch />} />
+            <Route path="/paper-trades" element={<PaperTrades />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AppLayout>
