@@ -338,10 +338,13 @@ export type Database = {
       evaluation_runs: {
         Row: {
           asset_id: string
+          best_tf_score: number | null
+          chosen_timeframe: string | null
           created_at: string
           decisions_written_n: number
           error_text: string | null
           eta_seconds: number | null
+          evaluation_mode: string
           final_phase: string | null
           id: string
           progress_0_100: number
@@ -352,10 +355,13 @@ export type Database = {
         }
         Insert: {
           asset_id: string
+          best_tf_score?: number | null
+          chosen_timeframe?: string | null
           created_at?: string
           decisions_written_n?: number
           error_text?: string | null
           eta_seconds?: number | null
+          evaluation_mode?: string
           final_phase?: string | null
           id?: string
           progress_0_100?: number
@@ -366,10 +372,13 @@ export type Database = {
         }
         Update: {
           asset_id?: string
+          best_tf_score?: number | null
+          chosen_timeframe?: string | null
           created_at?: string
           decisions_written_n?: number
           error_text?: string | null
           eta_seconds?: number | null
+          evaluation_mode?: string
           final_phase?: string | null
           id?: string
           progress_0_100?: number
@@ -537,6 +546,36 @@ export type Database = {
           n_decisions?: number
           n_opened_trades?: number
           timeframe?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      incorporated_assets: {
+        Row: {
+          asset_id: string
+          created_at: string
+          default_timeframe: string
+          is_enabled: boolean
+          liquidity_tier: string
+          symbol: string
+          updated_at: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          default_timeframe?: string
+          is_enabled?: boolean
+          liquidity_tier?: string
+          symbol: string
+          updated_at?: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          default_timeframe?: string
+          is_enabled?: boolean
+          liquidity_tier?: string
+          symbol?: string
           updated_at?: string
         }
         Relationships: []
@@ -1707,6 +1746,51 @@ export type Database = {
           output_mode?: string
           reason?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      timeframe_stats: {
+        Row: {
+          asset_id: string
+          calibration_error: number
+          drift_flag: boolean
+          ev_mean: number
+          id: string
+          last_updated_ts: string
+          success_likelihood_score: number
+          timeframe: string
+          trades_n: number
+          win_rate: number
+          win_rate_recent: number
+          wins_n: number
+        }
+        Insert: {
+          asset_id: string
+          calibration_error?: number
+          drift_flag?: boolean
+          ev_mean?: number
+          id?: string
+          last_updated_ts?: string
+          success_likelihood_score?: number
+          timeframe?: string
+          trades_n?: number
+          win_rate?: number
+          win_rate_recent?: number
+          wins_n?: number
+        }
+        Update: {
+          asset_id?: string
+          calibration_error?: number
+          drift_flag?: boolean
+          ev_mean?: number
+          id?: string
+          last_updated_ts?: string
+          success_likelihood_score?: number
+          timeframe?: string
+          trades_n?: number
+          win_rate?: number
+          win_rate_recent?: number
+          wins_n?: number
         }
         Relationships: []
       }

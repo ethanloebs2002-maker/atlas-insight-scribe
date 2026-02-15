@@ -3,13 +3,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Target, Loader2, RotateCcw, AlertTriangle, ShieldAlert, Zap } from "lucide-react";
+import { Target, Loader2, RotateCcw, AlertTriangle, ShieldAlert, Zap, ArrowRight } from "lucide-react";
 import { useRunEvaluation } from "@/hooks/use-run-evaluation";
+import { useBestTimeframe } from "@/hooks/use-auto-eval";
 import type { EvalStatus } from "@/hooks/use-evaluation-progress";
 
 interface RunAnalysisEmptyStateProps {
   selectedAsset?: string;
   timeframe?: string;
+  onSwitchTimeframe?: (tf: string) => void;
 }
 
 function formatEta(seconds: number | null): string {
@@ -28,8 +30,11 @@ const BUTTON_LABELS: Record<EvalStatus, { label: string; icon: React.ReactNode }
   ERROR:      { label: "Retry Analysis",  icon: <RotateCcw className="h-4 w-4" /> },
 };
 
-export default function RunAnalysisEmptyState({ selectedAsset, timeframe = "4h" }: RunAnalysisEmptyStateProps) {
+export default function RunAnalysisEmptyState({ selectedAsset, timeframe = "4h", onSwitchTimeframe }: RunAnalysisEmptyStateProps) {
   const { run, canRun, isHalted, haltReason, state } = useRunEvaluation(selectedAsset);
+  const { data: bestTfRes } = useBestTimeframe(selectedAsset);
+  const bestTf = bestTfRes?.data?.timeframe;
+  const hasBetterTf = bestTf && bestTf !== timeframe;
   const isEvaluating = state.status === "EVALUATING";
   const btnConfig = BUTTON_LABELS[state.status];
 
@@ -69,7 +74,7 @@ export default function RunAnalysisEmptyState({ selectedAsset, timeframe = "4h" 
         {/* Title + Context */}
         <div className="space-y-1.5">
           <h3 className="text-sm font-mono font-bold text-foreground">
-            No decisions recorded yet
+            No decisions recorded yet{selectedAsset ? ` for ${timeframe}` : ""}
           </h3>
           <p className="text-xs font-mono text-muted-foreground max-w-md">
             {selectedAsset
@@ -77,13 +82,27 @@ export default function RunAnalysisEmptyState({ selectedAsset, timeframe = "4h" 
               : "Select an asset above to begin analysis."}
           </p>
           {selectedAsset && (
-            <div className="flex items-center justify-center gap-2 pt-1">
-              <Badge variant="outline" className="text-[10px] font-mono">
-                Asset: {selectedAsset}
-              </Badge>
-              <Badge variant="outline" className="text-[10px] font-mono">
-                Timeframe: {timeframe}
-              </Badge>
+            <div className="flex flex-col items-center gap-2 pt-1">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  Asset: {selectedAsset}
+                </Badge>
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  Timeframe: {timeframe}
+                </Badge>
+              </div>
+              {hasBetterTf && onSwitchTimeframe && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-[10px] font-mono gap-1 text-primary h-7"
+                  onClick={() => onSwitchTimeframe(bestTf)}
+                >
+                  <Zap className="h-3 w-3" />
+                  Best timeframe: {bestTf}
+                  <ArrowRight className="h-3 w-3" />
+                </Button>
+              )}
             </div>
           )}
         </div>
