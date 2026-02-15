@@ -2,3 +2,6 @@ project_id = "eusygqwganwriuxorhhe"
 
 [functions.crypto-data]
 verify_jwt = false
+
+[functions.paper-engine]
+verify_jwt = false

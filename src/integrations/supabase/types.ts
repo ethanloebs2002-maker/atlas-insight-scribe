@@ -14,7 +14,212 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      graduation_status: {
+        Row: {
+          asset_id: string
+          avg_return_r: number | null
+          dir_acc: number | null
+          graduation_level: number
+          horizon: string
+          id: string
+          influence_mode: string
+          integrity_gating_pass: boolean
+          last_drift_check: string | null
+          median_r: number | null
+          n_decisions: number
+          n_opened_trades: number
+          timeframe: string
+          updated_at: string
+        }
+        Insert: {
+          asset_id: string
+          avg_return_r?: number | null
+          dir_acc?: number | null
+          graduation_level?: number
+          horizon?: string
+          id?: string
+          influence_mode?: string
+          integrity_gating_pass?: boolean
+          last_drift_check?: string | null
+          median_r?: number | null
+          n_decisions?: number
+          n_opened_trades?: number
+          timeframe?: string
+          updated_at?: string
+        }
+        Update: {
+          asset_id?: string
+          avg_return_r?: number | null
+          dir_acc?: number | null
+          graduation_level?: number
+          horizon?: string
+          id?: string
+          influence_mode?: string
+          integrity_gating_pass?: boolean
+          last_drift_check?: string | null
+          median_r?: number | null
+          n_decisions?: number
+          n_opened_trades?: number
+          timeframe?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      paper_decisions: {
+        Row: {
+          agreement_score: number
+          asset_id: string
+          completeness_score: number
+          consensus_score: number
+          correct: boolean | null
+          created_at: string
+          direction_pred: string
+          evaluated_at: string | null
+          evidence_snapshot_json: Json | null
+          horizon: string
+          id: string
+          probability_pred: number
+          realized_dir: string | null
+          realized_move_pct: number | null
+          ref_price: number
+          timeframe: string
+          ts: string
+        }
+        Insert: {
+          agreement_score?: number
+          asset_id: string
+          completeness_score?: number
+          consensus_score?: number
+          correct?: boolean | null
+          created_at?: string
+          direction_pred: string
+          evaluated_at?: string | null
+          evidence_snapshot_json?: Json | null
+          horizon?: string
+          id?: string
+          probability_pred: number
+          realized_dir?: string | null
+          realized_move_pct?: number | null
+          ref_price: number
+          timeframe?: string
+          ts?: string
+        }
+        Update: {
+          agreement_score?: number
+          asset_id?: string
+          completeness_score?: number
+          consensus_score?: number
+          correct?: boolean | null
+          created_at?: string
+          direction_pred?: string
+          evaluated_at?: string | null
+          evidence_snapshot_json?: Json | null
+          horizon?: string
+          id?: string
+          probability_pred?: number
+          realized_dir?: string | null
+          realized_move_pct?: number | null
+          ref_price?: number
+          timeframe?: string
+          ts?: string
+        }
+        Relationships: []
+      }
+      paper_trades: {
+        Row: {
+          asset_id: string
+          created_at: string
+          decision_id: string | null
+          entry_zone_high: number
+          entry_zone_low: number
+          evidence_snapshot_json: Json | null
+          exit_price: number | null
+          fill_price: number | null
+          id: string
+          mae_r: number | null
+          mfe_r: number | null
+          outcome_label: string | null
+          regime_label: string | null
+          return_pct: number | null
+          return_r: number | null
+          scenario_type: string
+          status: string
+          stop_level: number | null
+          stop_rule: string | null
+          targets_json: Json | null
+          time_window_end: string | null
+          timeframe: string
+          trigger_rule: string | null
+          ts_closed: string | null
+          ts_created: string
+          ts_opened: string | null
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          decision_id?: string | null
+          entry_zone_high: number
+          entry_zone_low: number
+          evidence_snapshot_json?: Json | null
+          exit_price?: number | null
+          fill_price?: number | null
+          id?: string
+          mae_r?: number | null
+          mfe_r?: number | null
+          outcome_label?: string | null
+          regime_label?: string | null
+          return_pct?: number | null
+          return_r?: number | null
+          scenario_type: string
+          status?: string
+          stop_level?: number | null
+          stop_rule?: string | null
+          targets_json?: Json | null
+          time_window_end?: string | null
+          timeframe?: string
+          trigger_rule?: string | null
+          ts_closed?: string | null
+          ts_created?: string
+          ts_opened?: string | null
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          decision_id?: string | null
+          entry_zone_high?: number
+          entry_zone_low?: number
+          evidence_snapshot_json?: Json | null
+          exit_price?: number | null
+          fill_price?: number | null
+          id?: string
+          mae_r?: number | null
+          mfe_r?: number | null
+          outcome_label?: string | null
+          regime_label?: string | null
+          return_pct?: number | null
+          return_r?: number | null
+          scenario_type?: string
+          status?: string
+          stop_level?: number | null
+          stop_rule?: string | null
+          targets_json?: Json | null
+          time_window_end?: string | null
+          timeframe?: string
+          trigger_rule?: string | null
+          ts_closed?: string | null
+          ts_created?: string
+          ts_opened?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_trades_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

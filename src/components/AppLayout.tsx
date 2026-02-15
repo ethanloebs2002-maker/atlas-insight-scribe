@@ -1,11 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { Activity, Search, BarChart3, Anchor, Users, FlaskConical } from 'lucide-react';
+import { Activity, Search, BarChart3, Anchor, FlaskConical } from 'lucide-react';
 
 const navItems = [
   { to: '/', label: 'Search', icon: Search },
   { to: '/dashboard', label: 'Dashboard', icon: BarChart3 },
   { to: '/whale-watch', label: 'Whale Watch', icon: Anchor },
+  { to: '/paper-trades', label: 'Paper Trades', icon: FlaskConical },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
