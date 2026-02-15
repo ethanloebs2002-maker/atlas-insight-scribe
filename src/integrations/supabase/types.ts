@@ -1453,6 +1453,7 @@ export type Database = {
           evidence_snapshot_json: Json | null
           horizon: string
           id: string
+          probability_components: Json | null
           probability_pred: number
           probability_raw: number | null
           probability_source: string | null
@@ -1477,6 +1478,7 @@ export type Database = {
           evidence_snapshot_json?: Json | null
           horizon?: string
           id?: string
+          probability_components?: Json | null
           probability_pred: number
           probability_raw?: number | null
           probability_source?: string | null
@@ -1501,6 +1503,7 @@ export type Database = {
           evidence_snapshot_json?: Json | null
           horizon?: string
           id?: string
+          probability_components?: Json | null
           probability_pred?: number
           probability_raw?: number | null
           probability_source?: string | null
