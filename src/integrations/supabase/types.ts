@@ -1479,8 +1479,10 @@ export type Database = {
       paper_trades: {
         Row: {
           asset_id: string
+          close_reason: string | null
           created_at: string
           decision_id: string | null
+          duplicate_key: string | null
           entry_zone_high: number
           entry_zone_low: number
           evidence_snapshot_json: Json | null
@@ -1507,8 +1509,10 @@ export type Database = {
         }
         Insert: {
           asset_id: string
+          close_reason?: string | null
           created_at?: string
           decision_id?: string | null
+          duplicate_key?: string | null
           entry_zone_high: number
           entry_zone_low: number
           evidence_snapshot_json?: Json | null
@@ -1535,8 +1539,10 @@ export type Database = {
         }
         Update: {
           asset_id?: string
+          close_reason?: string | null
           created_at?: string
           decision_id?: string | null
+          duplicate_key?: string | null
           entry_zone_high?: number
           entry_zone_low?: number
           evidence_snapshot_json?: Json | null
