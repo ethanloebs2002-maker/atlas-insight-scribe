@@ -6,23 +6,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// CoinCap asset ID mapping
-const COINCAP_IDS: Record<string, string> = {
-  BTC: "bitcoin",
-  ETH: "ethereum",
-  SOL: "solana",
-  DOGE: "dogecoin",
-  AVAX: "avalanche",
-  LINK: "chainlink",
-  ADA: "cardano",
-  DOT: "polkadot",
-  XRP: "xrp",
-};
-
-// CryptoCompare symbol mapping (for OHLCV)
-const FSYMS: Record<string, string> = {
-  BTC: "BTC", ETH: "ETH", SOL: "SOL", DOGE: "DOGE",
-  AVAX: "AVAX", LINK: "LINK", ADA: "ADA", DOT: "DOT", XRP: "XRP",
+// CryptoCompare symbol-to-name mapping
+const COIN_NAMES: Record<string, string> = {
+  BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", DOGE: "Dogecoin",
+  AVAX: "Avalanche", LINK: "Chainlink", ADA: "Cardano", DOT: "Polkadot", XRP: "XRP",
 };
 
 interface MarketData {
@@ -43,41 +30,40 @@ interface KlineData {
   volume: number;
 }
 
-async function fetchCoinCapMarket(symbols: string[]): Promise<MarketData[]> {
-  const ids = symbols.map(s => COINCAP_IDS[s.toUpperCase()]).filter(Boolean).join(",");
-  if (!ids) return [];
+async function fetchCryptoCompareMarket(symbols: string[]): Promise<MarketData[]> {
+  const fsyms = symbols.filter(s => COIN_NAMES[s.toUpperCase()]).map(s => s.toUpperCase()).join(",");
+  if (!fsyms) return [];
 
-  const url = `https://api.coincap.io/v2/assets?ids=${ids}`;
+  const url = `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${fsyms}&tsyms=USD`;
   try {
     const res = await fetch(url);
     if (!res.ok) {
-      console.error("CoinCap error:", res.status, await res.text());
+      console.error("CryptoCompare market error:", res.status, await res.text());
       return [];
     }
     const json = await res.json();
-    
-    const idToSymbol: Record<string, string> = {};
-    for (const [sym, id] of Object.entries(COINCAP_IDS)) {
-      idToSymbol[id] = sym;
-    }
+    const raw = json.RAW || {};
 
-    return (json.data || []).map((coin: any) => ({
-      symbol: idToSymbol[coin.id] || coin.symbol,
-      name: coin.name,
-      price: parseFloat(coin.priceUsd) || 0,
-      change24h: parseFloat(coin.changePercent24Hr) || 0,
-      volume24h: parseFloat(coin.volumeUsd24Hr) || 0,
-      marketCap: parseFloat(coin.marketCapUsd) || 0,
-    }));
+    return symbols.filter(s => raw[s.toUpperCase()]?.USD).map(s => {
+      const d = raw[s.toUpperCase()].USD;
+      return {
+        symbol: s.toUpperCase(),
+        name: COIN_NAMES[s.toUpperCase()] || s.toUpperCase(),
+        price: d.PRICE || 0,
+        change24h: d.CHANGEPCT24HOUR || 0,
+        volume24h: d.TOTALVOLUME24HTO || 0,
+        marketCap: d.MKTCAP || 0,
+      };
+    });
   } catch (e) {
-    console.error("CoinCap fetch error:", e);
+    console.error("CryptoCompare market fetch error:", e);
     return [];
   }
 }
 
 async function fetchCryptoCompareOHLCV(symbol: string, limit: number = 100): Promise<KlineData[]> {
-  const fsym = FSYMS[symbol.toUpperCase()];
-  if (!fsym) return [];
+  const fsym = symbol.toUpperCase();
+  if (!COIN_NAMES[fsym]) return [];
 
   // histohour with aggregate=4 gives 4h candles
   const url = `https://min-api.cryptocompare.com/data/v2/histohour?fsym=${fsym}&tsym=USD&limit=${limit}&aggregate=4`;
@@ -298,8 +284,8 @@ serve(async (req) => {
     const symbols = symbolsParam.split(",").map(s => s.trim().toUpperCase());
 
     if (action === "market") {
-      const markets = await fetchCoinCapMarket(symbols);
-      return new Response(JSON.stringify({ data: markets, source: "coincap", timestamp: Date.now() }), {
+      const markets = await fetchCryptoCompareMarket(symbols);
+      return new Response(JSON.stringify({ data: markets, source: "cryptocompare", timestamp: Date.now() }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -307,7 +293,7 @@ serve(async (req) => {
     if (action === "analysis") {
       const symbol = symbols[0];
       const [markets, klines] = await Promise.all([
-        fetchCoinCapMarket([symbol]),
+        fetchCryptoCompareMarket([symbol]),
         fetchCryptoCompareOHLCV(symbol, 100),
       ]);
 
@@ -319,7 +305,7 @@ serve(async (req) => {
       }
 
       const analysis = generateAnalysis(klines, markets[0]);
-      return new Response(JSON.stringify({ data: analysis, source: "coincap+cryptocompare", timestamp: Date.now() }), {
+      return new Response(JSON.stringify({ data: analysis, source: "cryptocompare", timestamp: Date.now() }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
