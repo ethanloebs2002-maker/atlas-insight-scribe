@@ -643,6 +643,12 @@ function TradeRow({ t, variant, selected, onClick }: { t: any; variant: "open" |
             <span className="text-bearish">SL {stopLevel.toLocaleString()}</span>
             <span className="text-muted-foreground/40">•</span>
             <span className="truncate">{tpSummary}</span>
+            {typeof t.initial_probability_pred === "number" && (
+              <>
+                <span className="text-muted-foreground/40">•</span>
+                <span className="text-primary font-bold">P0 {(t.initial_probability_pred * 100).toFixed(2)}%</span>
+              </>
+            )}
           </>
         )}
         {variant === "closed" && (

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -26,6 +27,7 @@ interface DecisionChartProps {
   stopLoss: number;
   targets?: number[];        // multiple take-profit levels
   candles?: Candle[];
+  livePrice?: number | null; // current live price overlay
   /** @deprecated use targets[] instead */
   takeProfit?: number;
   /** @deprecated kept for backwards-compat */
@@ -116,6 +118,7 @@ export default function DecisionChart({
   targets,
   takeProfit,
   candles: externalCandles,
+  livePrice,
   refPrice,
 }: DecisionChartProps) {
   // Resolve target prices: prefer targets[], fall back to single takeProfit
@@ -150,6 +153,7 @@ export default function DecisionChart({
     entry,
     stopLoss,
     ...resolvedTargets,
+    ...(typeof livePrice === "number" ? [livePrice] : []),
   ];
   const yMin = Math.min(...allPrices) * 0.999;
   const yMax = Math.max(...allPrices) * 1.001;
@@ -261,6 +265,23 @@ export default function DecisionChart({
               }}
             />
           ))}
+
+          {/* Live price line */}
+          {typeof livePrice === "number" && (
+            <ReferenceLine
+              y={livePrice}
+              stroke="hsl(45 100% 60%)"
+              strokeWidth={1}
+              strokeDasharray="2 2"
+              label={{
+                value: `LIVE $${livePrice.toLocaleString()}`,
+                position: "right",
+                fill: "hsl(45 100% 60%)",
+                fontSize: 8,
+                fontFamily: "var(--font-mono)",
+              }}
+            />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </div>

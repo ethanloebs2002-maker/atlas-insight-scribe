@@ -1528,6 +1528,8 @@ export type Database = {
           exit_price: number | null
           fill_price: number | null
           id: string
+          initial_probability_pred: number | null
+          initial_probability_source: string | null
           mae_r: number | null
           mfe_r: number | null
           outcome_label: string | null
@@ -1558,6 +1560,8 @@ export type Database = {
           exit_price?: number | null
           fill_price?: number | null
           id?: string
+          initial_probability_pred?: number | null
+          initial_probability_source?: string | null
           mae_r?: number | null
           mfe_r?: number | null
           outcome_label?: string | null
@@ -1588,6 +1592,8 @@ export type Database = {
           exit_price?: number | null
           fill_price?: number | null
           id?: string
+          initial_probability_pred?: number | null
+          initial_probability_source?: string | null
           mae_r?: number | null
           mfe_r?: number | null
           outcome_label?: string | null
