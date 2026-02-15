@@ -172,15 +172,15 @@ function PatternDetail({ pattern }: { pattern: GlobalPattern }) {
 }
 
 export default function GlobalPatternLibrary() {
-  const [statusFilter, setStatusFilter] = useState("");
-  const [tfFilter, setTfFilter] = useState("");
-  const [regimeFilter, setRegimeFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [tfFilter, setTfFilter] = useState("all");
+  const [regimeFilter, setRegimeFilter] = useState("all");
   const [selectedPattern, setSelectedPattern] = useState<GlobalPattern | null>(null);
 
   const { data: patterns, isLoading } = useGlobalPatterns({
-    publish_status: statusFilter || undefined,
-    timeframe_class: tfFilter || undefined,
-    regime_label: regimeFilter || undefined,
+    publish_status: statusFilter !== "all" ? statusFilter : undefined,
+    timeframe_class: tfFilter !== "all" ? tfFilter : undefined,
+    regime_label: regimeFilter !== "all" ? regimeFilter : undefined,
   });
 
   const validate = useValidateGPR();
@@ -211,7 +211,7 @@ export default function GlobalPatternLibrary() {
             <SelectValue placeholder="All statuses" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All statuses</SelectItem>
+            <SelectItem value="all">All statuses</SelectItem>
             <SelectItem value="LOCAL_ONLY">LOCAL_ONLY</SelectItem>
             <SelectItem value="CANDIDATE">CANDIDATE</SelectItem>
             <SelectItem value="PUBLISHED">PUBLISHED</SelectItem>
@@ -224,7 +224,7 @@ export default function GlobalPatternLibrary() {
             <SelectValue placeholder="All timeframes" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All timeframes</SelectItem>
+            <SelectItem value="all">All timeframes</SelectItem>
             <SelectItem value="intraday">Intraday</SelectItem>
             <SelectItem value="swing">Swing</SelectItem>
             <SelectItem value="HTF">HTF</SelectItem>
@@ -236,7 +236,7 @@ export default function GlobalPatternLibrary() {
             <SelectValue placeholder="All regimes" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All regimes</SelectItem>
+            <SelectItem value="all">All regimes</SelectItem>
             <SelectItem value="trend">Trend</SelectItem>
             <SelectItem value="range">Range</SelectItem>
             <SelectItem value="chop">Chop</SelectItem>
