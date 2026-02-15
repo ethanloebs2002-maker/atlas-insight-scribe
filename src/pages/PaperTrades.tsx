@@ -619,6 +619,7 @@ function TradeRow({ t, variant, selected, onClick }: { t: any; variant: "open" |
     >
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[10px] font-mono font-bold shrink-0">{t.asset_id}</span>
+        <DirectionBadge scenarioType={t.scenario_type} />
         <ScenarioBadge type={t.scenario_type} />
         {variant === "open" && (
           <Badge variant={t.status === "OPEN" ? "default" : "secondary"} className="text-[8px] font-mono py-0 h-4">
@@ -747,6 +748,15 @@ function DirBadge({ dir }: { dir: string }) {
 function ScenarioBadge({ type }: { type: string }) {
   const cls = type === "bullish" ? "text-bullish" : type === "bearish" ? "text-bearish" : "text-neutral-signal";
   return <span className={`text-[9px] font-mono font-bold uppercase ${cls}`}>{type}</span>;
+}
+
+function DirectionBadge({ scenarioType }: { scenarioType: string }) {
+  const isLong = scenarioType === "bullish";
+  const label = isLong ? "LONG" : "SHORT";
+  const cls = isLong
+    ? "bg-bullish/10 text-bullish border-bullish"
+    : "bg-bearish/10 text-bearish border-bearish";
+  return <Badge variant="outline" className={`text-[8px] font-mono py-0 h-4 ${cls}`}>{label}</Badge>;
 }
 
 function OutcomeBadge({ outcome }: { outcome: string }) {
