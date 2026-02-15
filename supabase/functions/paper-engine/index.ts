@@ -569,7 +569,14 @@ async function evaluateTrades(asset_id: string) {
   let filled = 0, closed = 0;
 
   for (const t of pending || []) {
-    if (currentPrice >= t.entry_zone_low && currentPrice <= t.entry_zone_high) {
+    const isBull = t.scenario_type === "bullish";
+    // LONG: fillable when price drops to/below entry zone top
+    // SHORT: fillable when price rises to/above entry zone bottom
+    const fillable = isBull
+      ? (currentPrice <= t.entry_zone_high)
+      : (currentPrice >= t.entry_zone_low);
+
+    if (fillable) {
       await supabase.from("paper_trades").update({
         status: "OPEN",
         fill_price: currentPrice,

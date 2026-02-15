@@ -109,6 +109,11 @@ export default function DetailPanel({ item }: { item: SelectedItem | null }) {
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm font-mono font-bold">{item.asset_id}</span>
         {item.direction_pred && <DirBadge dir={item.direction_pred} />}
+        {!isDecision && item.scenario_type && (
+          <Badge variant="outline" className={`text-[8px] font-mono py-0 h-4 ${item.scenario_type === "bullish" ? "bg-bullish/10 text-bullish border-bullish" : "bg-bearish/10 text-bearish border-bearish"}`}>
+            {item.scenario_type === "bullish" ? "LONG" : "SHORT"}
+          </Badge>
+        )}
         {item.scenario_type && (
           <Badge variant="outline" className="text-[9px] font-mono uppercase">
             {item.scenario_type}
