@@ -1,15 +1,20 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Activity, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Search, Activity, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { useMarketData } from '@/hooks/use-crypto-data';
 import { mockAssets } from '@/data/mockData';
 import { formatPrice, formatLargeNumber } from '@/lib/atlas-utils';
 import { cn } from '@/lib/utils';
+import type { AssetOverview } from '@/types/atlas';
 
 export default function AssetSearch() {
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
+  const { data: liveAssets, isLoading, isError } = useMarketData();
 
-  const filtered = mockAssets.filter(a =>
+  const assets: AssetOverview[] = liveAssets && liveAssets.length > 0 ? liveAssets : mockAssets;
+
+  const filtered = assets.filter(a =>
     a.symbol.toLowerCase().includes(query.toLowerCase()) ||
     a.name.toLowerCase().includes(query.toLowerCase())
   );
@@ -26,7 +31,7 @@ export default function AssetSearch() {
           Crypto Market Intelligence & Decision Support Engine
         </p>
         <p className="text-[10px] text-muted-foreground font-mono mt-1">
-          Probabilistic forecasting • Not financial advice
+          {isLoading ? 'Loading live data…' : isError ? 'Using cached data • API unavailable' : 'Live data • CoinGecko + Binance'}
         </p>
       </div>
 
@@ -45,6 +50,14 @@ export default function AssetSearch() {
         </div>
       </div>
 
+      {/* Loading */}
+      {isLoading && (
+        <div className="flex items-center gap-2 text-muted-foreground text-xs font-mono mb-4">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Fetching live market data…
+        </div>
+      )}
+
       {/* Asset list */}
       <div className="w-full max-w-lg space-y-2">
         {filtered.map(asset => {
@@ -52,7 +65,7 @@ export default function AssetSearch() {
           return (
             <button
               key={asset.symbol}
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate(`/dashboard?symbol=${asset.symbol}`)}
               className="w-full flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-secondary/50 hover:border-primary/30 transition-all group"
             >
               <div className="flex items-center gap-3">
