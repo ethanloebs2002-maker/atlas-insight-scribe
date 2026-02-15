@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      anomaly_events: {
+        Row: {
+          asset_id: string
+          created_at: string
+          description: string | null
+          event_type: string
+          id: string
+          metrics_json: Json | null
+          resolved: boolean
+          resolved_at: string | null
+          severity: string
+        }
+        Insert: {
+          asset_id?: string
+          created_at?: string
+          description?: string | null
+          event_type: string
+          id?: string
+          metrics_json?: Json | null
+          resolved?: boolean
+          resolved_at?: string | null
+          severity?: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          description?: string | null
+          event_type?: string
+          id?: string
+          metrics_json?: Json | null
+          resolved?: boolean
+          resolved_at?: string | null
+          severity?: string
+        }
+        Relationships: []
+      }
       asset_fingerprints: {
         Row: {
           asset_id: string
@@ -470,6 +506,101 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      pattern_tiers: {
+        Row: {
+          asset_id: string
+          created_at: string
+          decay_rate: number
+          expired_at: string | null
+          id: string
+          last_check_ts: string
+          pattern_id: string
+          promoted_at: string | null
+          regime_context: string
+          tier: string
+          validated_at: string | null
+          validation_failures: number
+          validation_passes: number
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          decay_rate?: number
+          expired_at?: string | null
+          id?: string
+          last_check_ts?: string
+          pattern_id: string
+          promoted_at?: string | null
+          regime_context?: string
+          tier?: string
+          validated_at?: string | null
+          validation_failures?: number
+          validation_passes?: number
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          decay_rate?: number
+          expired_at?: string | null
+          id?: string
+          last_check_ts?: string
+          pattern_id?: string
+          promoted_at?: string | null
+          regime_context?: string
+          tier?: string
+          validated_at?: string | null
+          validation_failures?: number
+          validation_passes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pattern_tiers_pattern_id_fkey"
+            columns: ["pattern_id"]
+            isOneToOne: false
+            referencedRelation: "indicator_patterns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      system_status: {
+        Row: {
+          anomaly_halt: boolean
+          asset_id: string
+          created_at: string
+          escalation_count: number
+          id: string
+          last_anomaly_check: string | null
+          learning_frozen: boolean
+          output_mode: string
+          reason: string | null
+          updated_at: string
+        }
+        Insert: {
+          anomaly_halt?: boolean
+          asset_id?: string
+          created_at?: string
+          escalation_count?: number
+          id?: string
+          last_anomaly_check?: string | null
+          learning_frozen?: boolean
+          output_mode?: string
+          reason?: string | null
+          updated_at?: string
+        }
+        Update: {
+          anomaly_halt?: boolean
+          asset_id?: string
+          created_at?: string
+          escalation_count?: number
+          id?: string
+          last_anomaly_check?: string | null
+          learning_frozen?: boolean
+          output_mode?: string
+          reason?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       transfer_priors: {
         Row: {

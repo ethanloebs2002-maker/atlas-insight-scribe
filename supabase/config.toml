@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.indicator-engine]
 verify_jwt = false
+
+[functions.safety-engine]
+verify_jwt = false

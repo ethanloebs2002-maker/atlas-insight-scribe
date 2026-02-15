@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Activity, Search, BarChart3, Anchor, FlaskConical } from 'lucide-react';
+import SystemStatusBanner from '@/components/SystemStatusBanner';
 
 const navItems = [
   { to: '/', label: 'Search', icon: Search },
@@ -20,7 +21,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3">
             <Activity className="h-5 w-5 text-primary animate-pulse-glow" />
             <span className="font-mono text-sm font-bold tracking-widest text-primary">ATLAS</span>
-            <span className="hidden sm:inline text-xs text-muted-foreground font-mono ml-1">v0.1</span>
+            <span className="hidden sm:inline text-xs text-muted-foreground font-mono ml-1">v1.6</span>
+            <SystemStatusBanner compact />
           </div>
 
           <nav className="flex items-center gap-1">
