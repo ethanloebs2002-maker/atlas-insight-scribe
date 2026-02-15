@@ -284,6 +284,13 @@ async function emitDecision(
   const emitRunId = crypto.randomUUID();
   const emittedAt = new Date().toISOString();
   const provenance = { emitted_by: emittedBy, emit_run_id: emitRunId, emitted_at: emittedAt };
+
+  // ── CANONICAL NORMALIZATION GATE ──────────────────────────────
+  // All score inputs are normalized once here so no downstream path can write invalid values.
+  context.agreementScore = clampProbability(context.agreementScore, "emitDecision/agreementScore");
+  context.consensusScore = clampProbability(context.consensusScore, "emitDecision/consensusScore");
+  context.completenessScore = clampProbability(context.completenessScore, "emitDecision/completenessScore");
+
   await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "emitDecision called", { ...context, routed_horizon: horizon, emittedBy });
 
   // A) If anomaly halt => PAUSED decision
