@@ -1,4 +1,5 @@
 import type { AssetOverview, ScenarioData, ConsensusData, WhaleEntry, EvidenceRow } from '@/types/atlas';
+import { asProbability } from '@/types/probability';
 
 const btcEvidence: EvidenceRow[] = [
   { signal: 'EMA 20/50 Cross', value: 'Bullish', interpretation: 'Golden cross on 4h', timeframe: '4h', weight: 0.8, source: 'Technical' },
@@ -24,7 +25,7 @@ export const mockAsset: AssetOverview = {
 export const mockScenarios: ScenarioData[] = [
   {
     type: 'bullish',
-    probability: 58,
+    probability: asProbability(0.58, "mockData.bullish"),
     confidence: 'MEDIUM',
     entryZones: [
       { priceRange: [96800, 97200], trigger: '4h close above EMA 20 with volume', timeframe: '4h', score: 78 },
@@ -41,7 +42,7 @@ export const mockScenarios: ScenarioData[] = [
   },
   {
     type: 'bearish',
-    probability: 28,
+    probability: asProbability(0.28, "mockData.bearish"),
     confidence: 'LOW',
     entryZones: [
       { priceRange: [98800, 99400], trigger: 'Rejection at resistance with bearish divergence', timeframe: '4h', score: 62 },
@@ -56,7 +57,7 @@ export const mockScenarios: ScenarioData[] = [
   },
   {
     type: 'neutral',
-    probability: 14,
+    probability: asProbability(0.14, "mockData.neutral"),
     confidence: 'LOW',
     entryZones: [],
     stopLoss: { level: 0, condition: 'N/A — range-bound, no directional bias' },
