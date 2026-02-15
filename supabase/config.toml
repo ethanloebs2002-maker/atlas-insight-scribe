@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.paper-engine-tick]
 verify_jwt = false
+
+[functions.whale-signal]
+verify_jwt = false
