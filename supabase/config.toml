@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.paper-engine]
 verify_jwt = false
+
+[functions.transfer-engine]
+verify_jwt = false

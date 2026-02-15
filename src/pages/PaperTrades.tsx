@@ -8,7 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock } from "lucide-react";
+import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft } from "lucide-react";
+import LearningSourcesPanel from "@/components/LearningSourcesPanel";
 
 const ASSETS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
 
@@ -103,6 +104,10 @@ export default function PaperTrades() {
           <TabsTrigger value="bh-learning" className="text-xs gap-1">
             <Zap className="h-3 w-3" />
             B&H Learning
+          </TabsTrigger>
+          <TabsTrigger value="transfer" className="text-xs gap-1">
+            <ArrowRightLeft className="h-3 w-3" />
+            Transfer Learning
           </TabsTrigger>
         </TabsList>
 
@@ -429,6 +434,11 @@ export default function PaperTrades() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* ─── TRANSFER LEARNING ───────────────────────────── */}
+        <TabsContent value="transfer">
+          <LearningSourcesPanel selectedAsset={selectedAsset} />
         </TabsContent>
       </Tabs>
     </div>
