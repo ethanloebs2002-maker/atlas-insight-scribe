@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { Activity, Search, BarChart3, Anchor, FlaskConical, Newspaper, Brain, LogOut } from 'lucide-react';
+import { Activity, Search, BarChart3, Anchor, FlaskConical, Newspaper, Brain, Globe, LogOut } from 'lucide-react';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ const navItems = [
   { to: '/paper-trades', label: 'Paper Trades', icon: FlaskConical },
   { to: '/news', label: 'News Intel', icon: Newspaper },
   { to: '/meta', label: 'Meta', icon: Brain },
+  { to: '/gpr', label: 'GPR', icon: Globe },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
