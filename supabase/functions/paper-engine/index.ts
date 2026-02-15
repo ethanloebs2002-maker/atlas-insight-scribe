@@ -428,6 +428,8 @@ async function emitDecision(
           status: "PENDING",
           evidence_snapshot_json: { run_id: runId },
           duplicate_key: tradeDupeKey,
+          initial_probability_pred: probability,
+          initial_probability_source: "indicator-engine",
         }).select().single();
 
         // Cancel older duplicates (KEEP_NEWEST)

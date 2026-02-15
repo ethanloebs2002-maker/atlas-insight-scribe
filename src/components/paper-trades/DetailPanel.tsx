@@ -4,6 +4,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { asProbability } from "@/types/probability";
 import DecisionChart, { type Candle } from "@/components/DecisionChart";
 import { useAssetAnalysis } from "@/hooks/use-crypto-data";
+import { useLivePrice } from "@/hooks/use-live-price";
 import { Target, ShieldAlert, ChevronDown, Bug, BarChart3 } from "lucide-react";
 import { useState } from "react";
 
@@ -253,6 +254,7 @@ function ChartWithData({ symbol, timeframe, entry, entryLabel, stopLoss, targets
   symbol: string; timeframe: string; entry: number; entryLabel?: string; stopLoss: number; targets?: number[];
 }) {
   const { data: analysis } = useAssetAnalysis(symbol, timeframe);
+  const livePrice = useLivePrice({ symbol, pollMs: 5000, enabled: true });
   const candles: Candle[] | undefined = analysis?.chartData?.map((c: any) => ({
     t: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
   }));
@@ -265,6 +267,7 @@ function ChartWithData({ symbol, timeframe, entry, entryLabel, stopLoss, targets
       stopLoss={stopLoss}
       targets={targets}
       candles={candles}
+      livePrice={livePrice}
       refPrice={entry}
     />
   );
