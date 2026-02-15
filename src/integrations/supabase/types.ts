@@ -284,6 +284,155 @@ export type Database = {
         }
         Relationships: []
       }
+      calibration_curves: {
+        Row: {
+          actual_win_rate: number
+          asset_id: string
+          calibration_delta: number
+          computed_at: string | null
+          confidence_interval: number | null
+          id: string
+          pillar: string
+          predicted_prob: number
+          regime: string | null
+          sample_size: number
+          timeframe: string
+          window_end: string
+          window_start: string
+        }
+        Insert: {
+          actual_win_rate: number
+          asset_id: string
+          calibration_delta: number
+          computed_at?: string | null
+          confidence_interval?: number | null
+          id?: string
+          pillar: string
+          predicted_prob: number
+          regime?: string | null
+          sample_size: number
+          timeframe: string
+          window_end: string
+          window_start: string
+        }
+        Update: {
+          actual_win_rate?: number
+          asset_id?: string
+          calibration_delta?: number
+          computed_at?: string | null
+          confidence_interval?: number | null
+          id?: string
+          pillar?: string
+          predicted_prob?: number
+          regime?: string | null
+          sample_size?: number
+          timeframe?: string
+          window_end?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
+      consensus_decisions: {
+        Row: {
+          agreement_rate: number
+          asset_id: string
+          block_reason: string | null
+          consensus_score: number
+          consilience_level: string | null
+          created_at: string | null
+          decision_type: string
+          direction: string
+          diversity_score: number
+          final_probability: number
+          groupthink_warning: boolean | null
+          historical_signal: Json
+          horizon: string
+          id: string
+          indicator_signal: Json
+          learning_signal: Json
+          news_signal: Json
+          paper_decision_id: string | null
+          pattern_signal: Json
+          ref_price: number | null
+          regime: string | null
+          run_id: string
+          sentiment_signal: Json
+          timeframe: string
+          uncertainty_escalation: boolean | null
+          version_tag: string | null
+          whale_divergence: boolean | null
+          whale_signal: Json
+        }
+        Insert: {
+          agreement_rate: number
+          asset_id: string
+          block_reason?: string | null
+          consensus_score: number
+          consilience_level?: string | null
+          created_at?: string | null
+          decision_type: string
+          direction: string
+          diversity_score: number
+          final_probability: number
+          groupthink_warning?: boolean | null
+          historical_signal: Json
+          horizon: string
+          id?: string
+          indicator_signal: Json
+          learning_signal: Json
+          news_signal: Json
+          paper_decision_id?: string | null
+          pattern_signal: Json
+          ref_price?: number | null
+          regime?: string | null
+          run_id: string
+          sentiment_signal: Json
+          timeframe: string
+          uncertainty_escalation?: boolean | null
+          version_tag?: string | null
+          whale_divergence?: boolean | null
+          whale_signal: Json
+        }
+        Update: {
+          agreement_rate?: number
+          asset_id?: string
+          block_reason?: string | null
+          consensus_score?: number
+          consilience_level?: string | null
+          created_at?: string | null
+          decision_type?: string
+          direction?: string
+          diversity_score?: number
+          final_probability?: number
+          groupthink_warning?: boolean | null
+          historical_signal?: Json
+          horizon?: string
+          id?: string
+          indicator_signal?: Json
+          learning_signal?: Json
+          news_signal?: Json
+          paper_decision_id?: string | null
+          pattern_signal?: Json
+          ref_price?: number | null
+          regime?: string | null
+          run_id?: string
+          sentiment_signal?: Json
+          timeframe?: string
+          uncertainty_escalation?: boolean | null
+          version_tag?: string | null
+          whale_divergence?: boolean | null
+          whale_signal?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consensus_decisions_paper_decision_id_fkey"
+            columns: ["paper_decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       debug_trace_events: {
         Row: {
           asset_id: string
@@ -568,6 +717,60 @@ export type Database = {
           n_opened_trades?: number
           timeframe?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      historical_analogs: {
+        Row: {
+          asset_id: string
+          created_at: string | null
+          current_state_json: Json
+          feature_weights: Json | null
+          historical_direction: string | null
+          historical_return_pct: number | null
+          historical_volatility: number | null
+          id: string
+          matched_features: string[] | null
+          matched_period_end: string
+          matched_period_start: string
+          outcome_window_hours: number
+          prediction_confidence: number | null
+          similarity_score: number
+          snapshot_ts: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string | null
+          current_state_json: Json
+          feature_weights?: Json | null
+          historical_direction?: string | null
+          historical_return_pct?: number | null
+          historical_volatility?: number | null
+          id?: string
+          matched_features?: string[] | null
+          matched_period_end: string
+          matched_period_start: string
+          outcome_window_hours: number
+          prediction_confidence?: number | null
+          similarity_score: number
+          snapshot_ts: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string | null
+          current_state_json?: Json
+          feature_weights?: Json | null
+          historical_direction?: string | null
+          historical_return_pct?: number | null
+          historical_volatility?: number | null
+          id?: string
+          matched_features?: string[] | null
+          matched_period_end?: string
+          matched_period_start?: string
+          outcome_window_hours?: number
+          prediction_confidence?: number | null
+          similarity_score?: number
+          snapshot_ts?: string
         }
         Relationships: []
       }
@@ -918,6 +1121,66 @@ export type Database = {
           overconfidence_risk?: number
           timeframe_class?: string
           ts?: string
+        }
+        Relationships: []
+      }
+      meta_insights: {
+        Row: {
+          actionable: boolean | null
+          asset_id: string | null
+          confidence: number | null
+          created_at: string | null
+          description: string
+          discovered_at: string | null
+          evidence_json: Json
+          id: string
+          insight_type: string
+          proposed_action: string | null
+          resolution_notes: string | null
+          resolved_at: string | null
+          severity: string | null
+          status: string | null
+          timeframe: string | null
+          title: string
+          updated_at: string | null
+        }
+        Insert: {
+          actionable?: boolean | null
+          asset_id?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          description: string
+          discovered_at?: string | null
+          evidence_json: Json
+          id?: string
+          insight_type: string
+          proposed_action?: string | null
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          severity?: string | null
+          status?: string | null
+          timeframe?: string | null
+          title: string
+          updated_at?: string | null
+        }
+        Update: {
+          actionable?: boolean | null
+          asset_id?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          description?: string
+          discovered_at?: string | null
+          evidence_json?: Json
+          id?: string
+          insight_type?: string
+          proposed_action?: string | null
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          severity?: string | null
+          status?: string | null
+          timeframe?: string | null
+          title?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -2056,6 +2319,75 @@ export type Database = {
           },
         ]
       }
+      pattern_catalog: {
+        Row: {
+          avg_r: number | null
+          created_at: string | null
+          discovered_at: string | null
+          id: string
+          last_occurrence_at: string | null
+          loss_count: number | null
+          optional_signals: Json | null
+          pattern_id: string
+          pattern_name: string
+          performance_by_asset: Json | null
+          performance_by_regime: Json | null
+          performance_by_timeframe: Json | null
+          regime_filter: string[] | null
+          required_signals: Json
+          status: string | null
+          tier: number | null
+          total_occurrences: number | null
+          updated_at: string | null
+          win_count: number | null
+          win_rate: number | null
+        }
+        Insert: {
+          avg_r?: number | null
+          created_at?: string | null
+          discovered_at?: string | null
+          id?: string
+          last_occurrence_at?: string | null
+          loss_count?: number | null
+          optional_signals?: Json | null
+          pattern_id: string
+          pattern_name: string
+          performance_by_asset?: Json | null
+          performance_by_regime?: Json | null
+          performance_by_timeframe?: Json | null
+          regime_filter?: string[] | null
+          required_signals: Json
+          status?: string | null
+          tier?: number | null
+          total_occurrences?: number | null
+          updated_at?: string | null
+          win_count?: number | null
+          win_rate?: number | null
+        }
+        Update: {
+          avg_r?: number | null
+          created_at?: string | null
+          discovered_at?: string | null
+          id?: string
+          last_occurrence_at?: string | null
+          loss_count?: number | null
+          optional_signals?: Json | null
+          pattern_id?: string
+          pattern_name?: string
+          performance_by_asset?: Json | null
+          performance_by_regime?: Json | null
+          performance_by_timeframe?: Json | null
+          regime_filter?: string[] | null
+          required_signals?: Json
+          status?: string | null
+          tier?: number | null
+          total_occurrences?: number | null
+          updated_at?: string | null
+          win_count?: number | null
+          win_rate?: number | null
+        }
+        Relationships: []
+      }
       pattern_signatures: {
         Row: {
           canonical_conditions_json: Json
@@ -2364,6 +2696,215 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      whale_positions: {
+        Row: {
+          asset_id: string
+          chain: string | null
+          closed_at: string | null
+          confidence: number | null
+          created_at: string | null
+          entry_price: number
+          exit_price: number | null
+          hold_time_hours: number | null
+          id: string
+          opened_at: string
+          pnl_r: number | null
+          pnl_usd: number | null
+          side: string
+          size_tokens: number | null
+          size_usd: number
+          source: string | null
+          status: string
+          tx_hash: string | null
+          updated_at: string | null
+          whale_wallet_id: string | null
+        }
+        Insert: {
+          asset_id: string
+          chain?: string | null
+          closed_at?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          entry_price: number
+          exit_price?: number | null
+          hold_time_hours?: number | null
+          id?: string
+          opened_at?: string
+          pnl_r?: number | null
+          pnl_usd?: number | null
+          side: string
+          size_tokens?: number | null
+          size_usd: number
+          source?: string | null
+          status: string
+          tx_hash?: string | null
+          updated_at?: string | null
+          whale_wallet_id?: string | null
+        }
+        Update: {
+          asset_id?: string
+          chain?: string | null
+          closed_at?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          entry_price?: number
+          exit_price?: number | null
+          hold_time_hours?: number | null
+          id?: string
+          opened_at?: string
+          pnl_r?: number | null
+          pnl_usd?: number | null
+          side?: string
+          size_tokens?: number | null
+          size_usd?: number
+          source?: string | null
+          status?: string
+          tx_hash?: string | null
+          updated_at?: string | null
+          whale_wallet_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whale_positions_whale_wallet_id_fkey"
+            columns: ["whale_wallet_id"]
+            isOneToOne: false
+            referencedRelation: "whale_wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whale_signals: {
+        Row: {
+          asset_id: string
+          avg_whale_integrity: number
+          avg_whale_win_rate: number
+          computed_at: string
+          confidence: number
+          direction: string
+          elite_whale_count: number
+          id: string
+          long_position_size_usd: number
+          lookback_hours: number
+          net_bias: number
+          short_position_size_usd: number
+          timeframe: string
+          top_whales_json: Json | null
+          total_position_size_usd: number
+          whale_count: number
+        }
+        Insert: {
+          asset_id: string
+          avg_whale_integrity: number
+          avg_whale_win_rate: number
+          computed_at?: string
+          confidence: number
+          direction: string
+          elite_whale_count: number
+          id?: string
+          long_position_size_usd: number
+          lookback_hours: number
+          net_bias: number
+          short_position_size_usd: number
+          timeframe: string
+          top_whales_json?: Json | null
+          total_position_size_usd: number
+          whale_count: number
+        }
+        Update: {
+          asset_id?: string
+          avg_whale_integrity?: number
+          avg_whale_win_rate?: number
+          computed_at?: string
+          confidence?: number
+          direction?: string
+          elite_whale_count?: number
+          id?: string
+          long_position_size_usd?: number
+          lookback_hours?: number
+          net_bias?: number
+          short_position_size_usd?: number
+          timeframe?: string
+          top_whales_json?: Json | null
+          total_position_size_usd?: number
+          whale_count?: number
+        }
+        Relationships: []
+      }
+      whale_wallets: {
+        Row: {
+          asset_id: string
+          attribution_confidence: number
+          avg_hold_time_hours: number | null
+          avg_position_size_usd: number | null
+          consistency_score: number | null
+          created_at: string | null
+          first_seen_at: string | null
+          id: string
+          integrity_score: number
+          is_active: boolean | null
+          is_elite: boolean | null
+          last_30d_pnl: number | null
+          last_30d_trade_count: number | null
+          last_30d_win_rate: number | null
+          last_evaluated_at: string | null
+          last_trade_ts: string | null
+          lot_win_rate: number
+          realized_pnl_usd: number
+          tier: number | null
+          trade_count: number
+          updated_at: string | null
+          wallet_address: string
+        }
+        Insert: {
+          asset_id: string
+          attribution_confidence: number
+          avg_hold_time_hours?: number | null
+          avg_position_size_usd?: number | null
+          consistency_score?: number | null
+          created_at?: string | null
+          first_seen_at?: string | null
+          id?: string
+          integrity_score: number
+          is_active?: boolean | null
+          is_elite?: boolean | null
+          last_30d_pnl?: number | null
+          last_30d_trade_count?: number | null
+          last_30d_win_rate?: number | null
+          last_evaluated_at?: string | null
+          last_trade_ts?: string | null
+          lot_win_rate: number
+          realized_pnl_usd: number
+          tier?: number | null
+          trade_count: number
+          updated_at?: string | null
+          wallet_address: string
+        }
+        Update: {
+          asset_id?: string
+          attribution_confidence?: number
+          avg_hold_time_hours?: number | null
+          avg_position_size_usd?: number | null
+          consistency_score?: number | null
+          created_at?: string | null
+          first_seen_at?: string | null
+          id?: string
+          integrity_score?: number
+          is_active?: boolean | null
+          is_elite?: boolean | null
+          last_30d_pnl?: number | null
+          last_30d_trade_count?: number | null
+          last_30d_win_rate?: number | null
+          last_evaluated_at?: string | null
+          last_trade_ts?: string | null
+          lot_win_rate?: number
+          realized_pnl_usd?: number
+          tier?: number | null
+          trade_count?: number
+          updated_at?: string | null
+          wallet_address?: string
         }
         Relationships: []
       }
