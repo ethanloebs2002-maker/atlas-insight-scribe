@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAssetAnalysis } from '@/hooks/use-crypto-data';
 import { mockAsset, mockScenarios, mockConsensus, mockWhales } from '@/data/mockData';
@@ -13,7 +14,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
   const symbol = searchParams.get('symbol') || 'BTC';
-  const { data: analysis, isLoading, isError } = useAssetAnalysis(symbol);
+  const [timeframe, setTimeframe] = useState('4h');
+  const { data: analysis, isLoading, isError } = useAssetAnalysis(symbol, timeframe);
 
   const asset = analysis?.asset || mockAsset;
   const scenarios = analysis?.scenarios || mockScenarios;
@@ -60,6 +62,8 @@ export default function Dashboard() {
             <AdvancedChart
               data={analysis.chartData}
               symbol={asset.symbol}
+              timeframe={timeframe}
+              onTimeframeChange={setTimeframe}
               entryZones={bullScenario?.entryZones?.map(ez => ({ low: ez.priceRange[0], high: ez.priceRange[1] }))}
               stopLevel={bullScenario?.stopLoss?.level}
               targets={bullScenario?.targets?.map(t => ({ price: t.price, label: t.label }))}
