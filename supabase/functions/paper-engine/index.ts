@@ -736,7 +736,13 @@ async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: 
     const detectedRegime = scenarios[0]?.regime || undefined;
 
     if (scenarios.length > 0) {
-      const best = scenarios[0];
+      // Select scenario with MAX probability, not just first one
+      const best = scenarios.reduce((acc: any, s: any) => {
+        const accProb = Number(acc?.probability ?? -1);
+        const sProb = Number(s?.probability ?? -1);
+        return sProb > accProb ? s : acc;
+      }, scenarios[0]);
+
       const evidenceCount = best.evidence?.length || 0;
       completenessScore = Math.min(1, evidenceCount / 8);
       const agreeCount = (best.evidence || []).filter((e: any) => {
@@ -747,6 +753,14 @@ async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: 
       }).length;
       agreementScore = evidenceCount > 0 ? agreeCount / evidenceCount : 0;
       consensusScore = clampProbability(best.probability, "CONSENSUS_BUILD/best.probability");
+
+      console.log(`[PROBABILITY_DEBUG] ${asset_id}:`, {
+        scenarios_count: scenarios.length,
+        best_type: best.type,
+        best_probability_raw: best.probability,
+        consensus_score: consensusScore,
+        all_probabilities: scenarios.map((s: any) => ({ type: s.type, prob: s.probability })),
+      });
     }
 
     // Evaluate existing decisions + process execution (fills/exits)
