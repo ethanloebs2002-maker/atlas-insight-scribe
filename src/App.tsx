@@ -10,6 +10,7 @@ import AssetSearch from "@/pages/AssetSearch";
 import Dashboard from "@/pages/Dashboard";
 import WhaleWatch from "@/pages/WhaleWatch";
 import PaperTrades from "@/pages/PaperTrades";
+import NewsIntelligence from "@/pages/NewsIntelligence";
 import Login from "@/pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -34,6 +35,7 @@ const App = () => (
                       <Route path="/dashboard" element={<Dashboard />} />
                       <Route path="/whale-watch" element={<WhaleWatch />} />
                       <Route path="/paper-trades" element={<PaperTrades />} />
+                      <Route path="/news" element={<NewsIntelligence />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>
