@@ -299,6 +299,116 @@ export type Database = {
         }
         Relationships: []
       }
+      global_pattern_evidence: {
+        Row: {
+          asset_id: string
+          context_bucket_id: string
+          created_at: string
+          diracc_uplift: number
+          ev_uplift: number
+          id: string
+          last_validated_ts: string
+          signature_hash: string
+          stability_score: number
+          support_n_decisions: number
+          support_n_trades: number
+          timeframe_class: string
+        }
+        Insert: {
+          asset_id: string
+          context_bucket_id?: string
+          created_at?: string
+          diracc_uplift?: number
+          ev_uplift?: number
+          id?: string
+          last_validated_ts?: string
+          signature_hash: string
+          stability_score?: number
+          support_n_decisions?: number
+          support_n_trades?: number
+          timeframe_class?: string
+        }
+        Update: {
+          asset_id?: string
+          context_bucket_id?: string
+          created_at?: string
+          diracc_uplift?: number
+          ev_uplift?: number
+          id?: string
+          last_validated_ts?: string
+          signature_hash?: string
+          stability_score?: number
+          support_n_decisions?: number
+          support_n_trades?: number
+          timeframe_class?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "global_pattern_evidence_signature_hash_fkey"
+            columns: ["signature_hash"]
+            isOneToOne: false
+            referencedRelation: "global_patterns"
+            referencedColumns: ["signature_hash"]
+          },
+        ]
+      }
+      global_patterns: {
+        Row: {
+          assets_success_n: number
+          assets_tested_n: number
+          canonical_conditions_json: Json
+          context_tags_json: Json
+          contexts_supported_json: Json
+          created_at: string
+          description_snippet: string
+          first_published_ts: string | null
+          last_validated_ts: string
+          mean_diracc_uplift: number
+          mean_ev_uplift: number
+          portability_score: number
+          publish_status: string
+          signature_hash: string
+          stability_score: number
+          updated_at: string
+        }
+        Insert: {
+          assets_success_n?: number
+          assets_tested_n?: number
+          canonical_conditions_json?: Json
+          context_tags_json?: Json
+          contexts_supported_json?: Json
+          created_at?: string
+          description_snippet?: string
+          first_published_ts?: string | null
+          last_validated_ts?: string
+          mean_diracc_uplift?: number
+          mean_ev_uplift?: number
+          portability_score?: number
+          publish_status?: string
+          signature_hash: string
+          stability_score?: number
+          updated_at?: string
+        }
+        Update: {
+          assets_success_n?: number
+          assets_tested_n?: number
+          canonical_conditions_json?: Json
+          context_tags_json?: Json
+          contexts_supported_json?: Json
+          created_at?: string
+          description_snippet?: string
+          first_published_ts?: string | null
+          last_validated_ts?: string
+          mean_diracc_uplift?: number
+          mean_ev_uplift?: number
+          portability_score?: number
+          publish_status?: string
+          signature_hash?: string
+          stability_score?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       graduation_status: {
         Row: {
           asset_id: string
@@ -1340,6 +1450,68 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      pattern_audit_log: {
+        Row: {
+          action_type: string
+          created_by: string | null
+          created_ts: string
+          id: string
+          reviewer_note: string
+          signature_hash: string
+        }
+        Insert: {
+          action_type?: string
+          created_by?: string | null
+          created_ts?: string
+          id?: string
+          reviewer_note?: string
+          signature_hash: string
+        }
+        Update: {
+          action_type?: string
+          created_by?: string | null
+          created_ts?: string
+          id?: string
+          reviewer_note?: string
+          signature_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pattern_audit_log_signature_hash_fkey"
+            columns: ["signature_hash"]
+            isOneToOne: false
+            referencedRelation: "global_patterns"
+            referencedColumns: ["signature_hash"]
+          },
+        ]
+      }
+      pattern_signatures: {
+        Row: {
+          canonical_conditions_json: Json
+          context_tags_json: Json
+          created_ts: string
+          id: string
+          pattern_id: string
+          signature_hash: string
+        }
+        Insert: {
+          canonical_conditions_json?: Json
+          context_tags_json?: Json
+          created_ts?: string
+          id?: string
+          pattern_id: string
+          signature_hash: string
+        }
+        Update: {
+          canonical_conditions_json?: Json
+          context_tags_json?: Json
+          created_ts?: string
+          id?: string
+          pattern_id?: string
+          signature_hash?: string
+        }
+        Relationships: []
       }
       pattern_tiers: {
         Row: {

@@ -12,6 +12,7 @@ import WhaleWatch from "@/pages/WhaleWatch";
 import PaperTrades from "@/pages/PaperTrades";
 import NewsIntelligence from "@/pages/NewsIntelligence";
 import MetaCognition from "@/pages/MetaCognition";
+import GlobalPatternLibrary from "@/pages/GlobalPatternLibrary";
 import Login from "@/pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -38,6 +39,7 @@ const App = () => (
                       <Route path="/paper-trades" element={<PaperTrades />} />
                       <Route path="/news" element={<NewsIntelligence />} />
                       <Route path="/meta" element={<MetaCognition />} />
+                      <Route path="/gpr" element={<GlobalPatternLibrary />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>
