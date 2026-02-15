@@ -230,6 +230,27 @@ export type Database = {
         }
         Relationships: []
       }
+      atlas_settings: {
+        Row: {
+          eval_cadence_ms: number
+          id: string
+          last_auto_eval_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          eval_cadence_ms?: number
+          id?: string
+          last_auto_eval_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          eval_cadence_ms?: number
+          id?: string
+          last_auto_eval_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       authority_states: {
         Row: {
           asset_id: string
@@ -1425,6 +1446,9 @@ export type Database = {
           correct: boolean | null
           created_at: string
           direction_pred: string
+          emit_run_id: string | null
+          emitted_at: string | null
+          emitted_by: string
           evaluated_at: string | null
           evidence_snapshot_json: Json | null
           horizon: string
@@ -1444,6 +1468,9 @@ export type Database = {
           correct?: boolean | null
           created_at?: string
           direction_pred: string
+          emit_run_id?: string | null
+          emitted_at?: string | null
+          emitted_by?: string
           evaluated_at?: string | null
           evidence_snapshot_json?: Json | null
           horizon?: string
@@ -1463,6 +1490,9 @@ export type Database = {
           correct?: boolean | null
           created_at?: string
           direction_pred?: string
+          emit_run_id?: string | null
+          emitted_at?: string | null
+          emitted_by?: string
           evaluated_at?: string | null
           evidence_snapshot_json?: Json | null
           horizon?: string

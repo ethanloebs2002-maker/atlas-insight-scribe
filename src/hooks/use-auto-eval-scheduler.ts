@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { CADENCE_MS, readEvalCadence, writeEvalCadence, type EvalCadence } from "@/lib/eval-cadence";
+import { supabase } from "@/integrations/supabase/client";
 
 /**
  * Single auto-evaluation scheduler. Owns exactly ONE setInterval.
  * Clears + restarts when cadence changes. Prevents duplicate loops.
+ * Also writes cadence to atlas_settings for server-side enforcement.
  */
 export function useAutoEvaluationScheduler(
   runAutoEvaluation: () => Promise<void> | void,
@@ -51,6 +53,13 @@ export function useAutoEvaluationScheduler(
   const setCadence = useCallback((c: EvalCadence) => {
     writeEvalCadence(c);
     setCadenceState(c);
+    // Write to atlas_settings so server-side cadence guard is in sync
+    supabase.from("atlas_settings" as any).update({
+      eval_cadence_ms: CADENCE_MS[c],
+      updated_at: new Date().toISOString(),
+    }).eq("id", "global").then(() => {
+      console.log(`[ATLAS] Cadence written to atlas_settings: ${c} (${CADENCE_MS[c]}ms)`);
+    });
   }, []);
 
   return { cadence, setCadence, runCount, lastRunAt, stop, start: () => start(cadence) };
