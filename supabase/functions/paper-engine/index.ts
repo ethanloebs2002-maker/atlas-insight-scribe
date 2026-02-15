@@ -875,7 +875,7 @@ async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: 
         return interp.includes("neutral");
       }).length;
       agreementScore = evidenceCount > 0 ? agreeCount / evidenceCount : 0;
-      consensusScore = best.probability || 0.5;
+      consensusScore = clampProbability(best.probability, "CONSENSUS_BUILD/best.probability");
     }
     await trace(runId, asset_id, timeframe, "CONSENSUS_BUILD", "INFO", "Consensus computed", { agreementScore, consensusScore, completenessScore });
 
