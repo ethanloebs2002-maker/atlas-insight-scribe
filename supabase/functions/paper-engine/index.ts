@@ -11,7 +11,31 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const VERSION_TAG = "v1.8.5";
+const VERSION_TAG = "v1.9.0";
+
+// ─── HORIZON ROUTER ──────────────────────────────────────────────
+type HorizonTF = "15m" | "30m" | "1h" | "4h" | "1d";
+type Horizon = "4h" | "6h" | "12h" | "24h" | "72h";
+
+const TF_TO_BASE_HORIZON: Record<HorizonTF, Horizon> = {
+  "15m": "4h",
+  "30m": "6h",
+  "1h": "12h",
+  "4h": "24h",
+  "1d": "72h",
+};
+const HORIZON_ORDER: Horizon[] = ["4h", "6h", "12h", "24h", "72h"];
+
+function routeHorizon(timeframe: string, regime?: string): Horizon {
+  const base = TF_TO_BASE_HORIZON[timeframe as HorizonTF];
+  if (!base) return "24h";
+  const idx = HORIZON_ORDER.indexOf(base);
+  if (!regime) return base;
+  const r = regime.toUpperCase();
+  if (r === "TRENDING") return HORIZON_ORDER[Math.min(idx + 1, HORIZON_ORDER.length - 1)];
+  if (r === "CHOPPY") return HORIZON_ORDER[Math.max(idx - 1, 0)];
+  return base;
+}
 
 // ─── GRADUATION THRESHOLDS ────────────────────────────────────────
 const GRADUATION_GATES = {
@@ -41,11 +65,15 @@ const CADENCE_MAP: Record<string, string> = {
 
 const NEUTRAL_BAND_CONFIG: Record<string, { minBand: number; atrMultiplier: number }> = {
   "3m": { minBand: 0.01, atrMultiplier: 0.6 },
+  "4h": { minBand: 0.001, atrMultiplier: 0.15 },
+  "6h": { minBand: 0.001, atrMultiplier: 0.18 },
+  "12h": { minBand: 0.0012, atrMultiplier: 0.2 },
   "6m": { minBand: 0.015, atrMultiplier: 0.25 },
   "1y": { minBand: 0.015, atrMultiplier: 0.25 },
   "3y": { minBand: 0.015, atrMultiplier: 0.25 },
   "5y": { minBand: 0.015, atrMultiplier: 0.25 },
   "24h": { minBand: 0.0015, atrMultiplier: 0.25 },
+  "72h": { minBand: 0.002, atrMultiplier: 0.3 },
 };
 
 const BH_L1_FAST_GATES = {
@@ -93,7 +121,7 @@ async function recordDecision(body: any) {
   const { asset_id, timeframe, horizon, ref_price, direction_pred, probability_pred, agreement_score, consensus_score, completeness_score, evidence_snapshot_json } = body;
 
   const { data, error } = await supabase.from("paper_decisions").insert({
-    asset_id, timeframe: timeframe || "4h", horizon: horizon || "24h",
+    asset_id, timeframe: timeframe || "4h", horizon: horizon || routeHorizon(timeframe || "4h"),
     ref_price, direction_pred, probability_pred,
     agreement_score: agreement_score || 0,
     consensus_score: consensus_score || 0,
@@ -137,16 +165,18 @@ async function emitDecision(
     evaluatedDecisions: number;
     evaluatedTrades: number;
     error: string | null;
+    regime?: string;
   }
 ) {
-  await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "emitDecision called", context);
+  const horizon = routeHorizon(timeframe, context.regime);
+  await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "emitDecision called", { ...context, routed_horizon: horizon });
 
   // A) If anomaly halt => PAUSED decision
   if (context.anomalyHalt) {
     const decision = await supabase.from("paper_decisions").insert({
       asset_id: assetId,
       timeframe,
-      horizon: "24h",
+      horizon,
       ref_price: context.currentPrice || 0,
       direction_pred: "NEUTRAL",
       probability_pred: 0.5,
@@ -170,7 +200,7 @@ async function emitDecision(
     const decision = await supabase.from("paper_decisions").insert({
       asset_id: assetId,
       timeframe,
-      horizon: "24h",
+      horizon,
       ref_price: context.currentPrice || 0,
       direction_pred: "NEUTRAL",
       probability_pred: 0.5,
@@ -213,7 +243,7 @@ async function emitDecision(
       const decision = await supabase.from("paper_decisions").insert({
         asset_id: assetId,
         timeframe,
-        horizon: "24h",
+        horizon,
         ref_price: context.currentPrice,
         direction_pred: direction,
         probability_pred: probability,
@@ -275,7 +305,7 @@ async function emitDecision(
   const decision = await supabase.from("paper_decisions").insert({
     asset_id: assetId,
     timeframe,
-    horizon: "24h",
+    horizon,
     ref_price: context.currentPrice || 0,
     direction_pred: "NEUTRAL",
     probability_pred: 0.3,
@@ -677,8 +707,9 @@ async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: 
     const analysisJson = await analysisRes.json();
     scenarios = analysisJson.data?.scenarios || [];
     await trace(runId, asset_id, timeframe, "INDICATORS", "INFO", "Analysis complete", { scenarioCount: scenarios.length });
+    // Detect regime from best scenario
+    const detectedRegime = scenarios[0]?.regime || undefined;
 
-    // Phase: CONSENSUS_BUILD - compute scores from scenarios
     if (scenarios.length > 0) {
       const best = scenarios[0];
       const evidenceCount = best.evidence?.length || 0;
@@ -715,6 +746,7 @@ async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: 
       evaluatedDecisions: decResult.evaluated,
       evaluatedTrades: (tradeResult as any).filled + (tradeResult as any).closed,
       error: null,
+      regime: detectedRegime,
     });
 
     // Update run as completed
@@ -756,6 +788,7 @@ async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: 
       evaluatedDecisions: 0,
       evaluatedTrades: 0,
       error: evalError,
+      regime: undefined,
     });
 
     await supabase.from("evaluation_runs").update({
