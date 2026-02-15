@@ -1,7 +1,9 @@
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { Activity, Search, BarChart3, Anchor, FlaskConical } from 'lucide-react';
+import { Activity, Search, BarChart3, Anchor, FlaskConical, LogOut } from 'lucide-react';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
+import { useAuth } from '@/hooks/use-auth';
+import { Button } from '@/components/ui/button';
 
 const navItems = [
   { to: '/', label: 'Search', icon: Search },
@@ -12,10 +14,10 @@ const navItems = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+  const { profile, signOut } = useAuth();
 
   return (
     <div className="min-h-screen bg-background grid-bg scanline">
-      {/* Top bar */}
       <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
         <div className="container flex h-14 items-center justify-between">
           <div className="flex items-center gap-3">
@@ -47,7 +49,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-            <span className="hidden md:inline">NOT FINANCIAL ADVICE</span>
+            {profile && (
+              <span className="hidden md:inline truncate max-w-[120px]">{profile.email}</span>
+            )}
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={signOut}>
+              <LogOut className="h-3.5 w-3.5" />
+            </Button>
             <span className="h-2 w-2 rounded-full bg-bullish animate-pulse-glow" />
           </div>
         </div>
