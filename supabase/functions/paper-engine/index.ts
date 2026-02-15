@@ -11,18 +11,14 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const VERSION_TAG = "v1.9.0";
+const VERSION_TAG = "v2.0.0";
 
 // ─── HORIZON ROUTER ──────────────────────────────────────────────
 type HorizonTF = "15m" | "30m" | "1h" | "4h" | "1d";
 type Horizon = "4h" | "6h" | "12h" | "24h" | "72h";
 
 const TF_TO_BASE_HORIZON: Record<HorizonTF, Horizon> = {
-  "15m": "4h",
-  "30m": "6h",
-  "1h": "12h",
-  "4h": "24h",
-  "1d": "72h",
+  "15m": "4h", "30m": "6h", "1h": "12h", "4h": "24h", "1d": "72h",
 };
 const HORIZON_ORDER: Horizon[] = ["4h", "6h", "12h", "24h", "72h"];
 
@@ -43,25 +39,12 @@ const GRADUATION_GATES = {
   2: { minDecisions: 500, minTrades: 150, minDirAcc: 0.70, minAvgR: 0.10 },
   3: { minDecisions: 500, minTrades: 150, minDirAcc: 0.72, minAvgR: 0.15 },
 };
-
-const INFLUENCE_MODES: Record<number, string> = {
-  0: "OFF",
-  1: "Calibration",
-  2: "Weights",
-  3: "Sizing",
-};
+const INFLUENCE_MODES: Record<number, string> = { 0: "OFF", 1: "Calibration", 2: "Weights", 3: "Sizing" };
 
 // ─── BUY & HOLD HORIZON CONFIGURATION ────────────────────────────
 const PUBLIC_HORIZONS = ["6m", "1y", "3y", "5y"];
 const LEARNING_HORIZONS = ["3m", "6m", "1y", "3y", "5y"];
-
-const CADENCE_MAP: Record<string, string> = {
-  "3m": "weekly",
-  "6m": "monthly",
-  "1y": "monthly",
-  "3y": "monthly",
-  "5y": "monthly",
-};
+const CADENCE_MAP: Record<string, string> = { "3m": "weekly", "6m": "monthly", "1y": "monthly", "3y": "monthly", "5y": "monthly" };
 
 const NEUTRAL_BAND_CONFIG: Record<string, { minBand: number; atrMultiplier: number }> = {
   "3m": { minBand: 0.01, atrMultiplier: 0.6 },
@@ -75,24 +58,13 @@ const NEUTRAL_BAND_CONFIG: Record<string, { minBand: number; atrMultiplier: numb
   "24h": { minBand: 0.0015, atrMultiplier: 0.25 },
   "72h": { minBand: 0.002, atrMultiplier: 0.3 },
 };
-
-const BH_L1_FAST_GATES = {
-  minDirAcc: 0.62,
-  minEvBh: 0,
-  minDecisions: 40,
-};
+const BH_L1_FAST_GATES = { minDirAcc: 0.62, minEvBh: 0, minDecisions: 40 };
 
 // ─── DEBUG TRACE HELPER ──────────────────────────────────────────
 async function trace(runId: string, assetId: string, timeframe: string, phase: string, eventType: string, message: string, payload: any = {}) {
   try {
     await supabase.from("debug_trace_events").insert({
-      run_id: runId,
-      asset_id: assetId,
-      timeframe,
-      phase,
-      event_type: eventType,
-      message,
-      payload_json: payload,
+      run_id: runId, asset_id: assetId, timeframe, phase, event_type: eventType, message, payload_json: payload,
     });
   } catch { /* non-critical */ }
 }
@@ -100,184 +72,114 @@ async function trace(runId: string, assetId: string, timeframe: string, phase: s
 // ─── TIMEFRAME NORMALIZATION ─────────────────────────────────────
 function normalizeTimeframeKey(input: string): string {
   const lower = input.toLowerCase();
-  const map: Record<string, string> = {
-    "1h": "1H", "60m": "1H",
-    "4h": "4H", "240m": "4H",
-    "1d": "1D", "24h": "1D",
-    "1w": "1W",
-  };
+  const map: Record<string, string> = { "1h": "1H", "60m": "1H", "4h": "4H", "240m": "4H", "1d": "1D", "24h": "1D", "1w": "1W" };
   return map[lower] || input;
 }
 
-function timeframeClass(tf: string): string {
-  const normalized = normalizeTimeframeKey(tf);
-  if (["1m", "5m", "15m", "30m", "1H"].includes(normalized)) return "intraday";
-  if (["4H", "8H", "12H"].includes(normalized)) return "swing";
-  return "HTF";
+// ─── EXCHANGE SIMULATION HELPERS ─────────────────────────────────
+const TF_MS: Record<string, number> = {
+  "1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+  "1h": 3_600_000, "4h": 14_400_000, "8h": 28_800_000, "1d": 86_400_000,
+};
+
+async function emitEvent(runId: string | null, entityType: string, entityId: string | null, eventType: string, payload: any = {}) {
+  try {
+    await supabase.from("paper_engine_events").insert({
+      run_id: runId, entity_type: entityType, entity_id: entityId,
+      event_type: eventType, version_tag: VERSION_TAG, payload,
+    });
+  } catch { /* non-critical */ }
+}
+
+async function getActivePolicy(): Promise<any> {
+  const { data } = await supabase.from("paper_policy").select("*").eq("is_active", true).order("created_at", { ascending: false }).limit(1);
+  return data?.[0] || null;
+}
+
+function getExpiryMinutes(policy: any, timeframe: string): number {
+  const map = policy?.expiry_minutes_by_tf || {};
+  return map[timeframe] || 4320;
+}
+
+async function getExposure(): Promise<{ open: number; pending: number }> {
+  const { data } = await supabase.from("paper_positions").select("status").in("status", ["OPEN", "PENDING_ENTRY"]);
+  const items = data || [];
+  return {
+    open: items.filter((p: any) => p.status === "OPEN").length,
+    pending: items.filter((p: any) => p.status === "PENDING_ENTRY").length,
+  };
 }
 
 // ─── RECORD DECISION ──────────────────────────────────────────────
 async function recordDecision(body: any) {
   const { asset_id, timeframe, horizon, ref_price, direction_pred, probability_pred, agreement_score, consensus_score, completeness_score, evidence_snapshot_json } = body;
-
   const { data, error } = await supabase.from("paper_decisions").insert({
     asset_id, timeframe: timeframe || "4h", horizon: horizon || routeHorizon(timeframe || "4h"),
     ref_price, direction_pred, probability_pred,
-    agreement_score: agreement_score || 0,
-    consensus_score: consensus_score || 0,
-    completeness_score: completeness_score || 0,
-    evidence_snapshot_json,
+    agreement_score: agreement_score || 0, consensus_score: consensus_score || 0, completeness_score: completeness_score || 0,
+    evidence_snapshot_json, version_tag: VERSION_TAG,
   }).select().single();
-
   if (error) throw error;
-  return data;
-}
-
-// ─── DEDUPE HELPER ────────────────────────────────────────────────
-function buildDuplicateKey(asset_id: string, direction: string, timeframe: string, horizon: string): string {
-  return `${asset_id}|${direction}|${timeframe}|${horizon}`;
-}
-
-async function cancelOlderDuplicates(duplicate_key: string, keepId?: string) {
-  let query = supabase
-    .from("paper_trades")
-    .select("id")
-    .eq("duplicate_key", duplicate_key)
-    .in("status", ["OPEN", "PENDING"])
-    .order("created_at", { ascending: false });
-
-  const { data: dupes } = await query;
-  if (!dupes || dupes.length === 0) return 0;
-
-  const idsToCancel = dupes.filter(d => d.id !== keepId).map(d => d.id);
-  if (idsToCancel.length === 0) return 0;
-
-  await supabase.from("paper_trades").update({
-    status: "CANCELED_DEDUPE",
-    ts_closed: new Date().toISOString(),
-    close_reason: "duplicate_key replaced by newer trade",
-  }).in("id", idsToCancel);
-
-  return idsToCancel.length;
-}
-
-// ─── RECORD TRADE ─────────────────────────────────────────────────
-async function recordTrade(body: any) {
-  const { decision_id, asset_id, timeframe, regime_label, scenario_type, entry_zone_low, entry_zone_high, trigger_rule, stop_level, stop_rule, targets_json, time_window_end, evidence_snapshot_json } = body;
-
-  // Determine direction from scenario_type for dedupe key
-  const direction = scenario_type === "bullish" ? "UP" : scenario_type === "bearish" ? "DOWN" : "NEUTRAL";
-  const horizon = body.horizon || "24h";
-  const dupeKey = buildDuplicateKey(asset_id, direction, timeframe || "4h", horizon);
-
-  const { data, error } = await supabase.from("paper_trades").insert({
-    decision_id, asset_id, timeframe: timeframe || "4h",
-    regime_label, scenario_type, entry_zone_low, entry_zone_high,
-    trigger_rule, stop_level, stop_rule, targets_json,
-    time_window_end, evidence_snapshot_json,
-    status: "PENDING",
-    duplicate_key: dupeKey,
-  }).select().single();
-
-  if (error) throw error;
-
-  // Cancel older duplicates (KEEP_NEWEST policy)
-  await cancelOlderDuplicates(dupeKey, data.id);
-
   return data;
 }
 
 // ─── CADENCE GUARD ───────────────────────────────────────────────
 async function checkCadenceGuard(emittedBy: string): Promise<{ allowed: boolean; reason?: string }> {
-  // Manual evaluations bypass the cadence guard
   if (emittedBy === "MANUAL_EVALUATE") return { allowed: true };
-
-  const { data: settings } = await supabase
-    .from("atlas_settings")
-    .select("*")
-    .eq("id", "global")
-    .maybeSingle();
-
-  if (!settings) return { allowed: true }; // no settings row = allow
-
+  const { data: settings } = await supabase.from("atlas_settings").select("*").eq("id", "global").maybeSingle();
+  if (!settings) return { allowed: true };
   const cadenceMs = settings.eval_cadence_ms || 3600000;
   const lastAt = settings.last_auto_eval_at;
-
   if (lastAt) {
     const elapsed = Date.now() - new Date(lastAt).getTime();
-    if (elapsed < cadenceMs) {
-      return { allowed: false, reason: `Cadence guard: ${elapsed}ms elapsed < ${cadenceMs}ms cadence` };
-    }
+    if (elapsed < cadenceMs) return { allowed: false, reason: `Cadence guard: ${elapsed}ms < ${cadenceMs}ms` };
   }
-
-  // Atomically stamp last_auto_eval_at
-  await supabase.from("atlas_settings").update({
-    last_auto_eval_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq("id", "global");
-
+  await supabase.from("atlas_settings").update({ last_auto_eval_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", "global");
   return { allowed: true };
 }
 
 // ─── PROBABILITY CLAMPING ────────────────────────────────────────
 function clampProbability(raw: unknown, source: string): number {
-  if (typeof raw !== "number" || !Number.isFinite(raw as number)) {
-    console.warn(`[clampProbability] Non-finite from ${source}, defaulting to 0.5`);
-    return 0.5;
-  }
+  if (typeof raw !== "number" || !Number.isFinite(raw as number)) { console.warn(`[clampProbability] Non-finite from ${source}`); return 0.5; }
   let v = raw as number;
-  // Auto-normalize percent-scale values (1–100] → [0.01–1]
-  if (v > 1 && v <= 100) {
-    console.warn(`[clampProbability] Auto-normalizing ${v} from ${source} (assumed %)`);
-    v = v / 100;
-  }
-  if (v < 0 || v > 1) {
-    console.error(`[clampProbability] Out of range from ${source}: ${v}, clamping`);
-    v = Math.max(0, Math.min(1, v));
-  }
+  if (v > 1 && v <= 100) { console.warn(`[clampProbability] Auto-normalizing ${v} from ${source}`); v = v / 100; }
+  if (v < 0 || v > 1) { console.error(`[clampProbability] Out of range from ${source}: ${v}`); v = Math.max(0, Math.min(1, v)); }
   return v;
 }
 
 // ─── STUCK PROBABILITY DETECTION ─────────────────────────────────
 async function checkStuckProbability(assetId: string, currentProb: number) {
   try {
-    const { data: recent } = await supabase
-      .from("paper_decisions")
-      .select("probability_pred")
-      .eq("asset_id", assetId)
-      .order("ts", { ascending: false })
-      .limit(20);
-
+    const { data: recent } = await supabase.from("paper_decisions").select("probability_pred").eq("asset_id", assetId).order("ts", { ascending: false }).limit(20);
     if (!recent || recent.length < 10) return;
-
-    const sameCount = recent.filter(
-      (r: any) => Math.abs(Number(r.probability_pred) - currentProb) < 0.001
-    ).length;
-
-    if (sameCount > recent.length * 0.8) {
-      console.warn(`[STUCK_PROB] Probability appears stuck for ${assetId}: ${currentProb} (${sameCount}/${recent.length} identical)`);
-    }
+    const sameCount = recent.filter((r: any) => Math.abs(Number(r.probability_pred) - currentProb) < 0.001).length;
+    if (sameCount > recent.length * 0.8) console.warn(`[STUCK_PROB] ${assetId}: ${currentProb} (${sameCount}/${recent.length} identical)`);
   } catch { /* non-critical */ }
+}
+
+// ─── DUPLICATE POSITION HANDLING ─────────────────────────────────
+function buildDuplicateKey(symbol: string, side: string, timeframe: string, horizon: string): string {
+  return `${symbol}|${side}|${timeframe}|${horizon}`;
+}
+
+async function cancelDuplicatePositions(duplicateKey: string, keepId?: string) {
+  const { data: dupes } = await supabase.from("paper_positions").select("id")
+    .eq("duplicate_key", duplicateKey).in("status", ["PENDING_ENTRY", "OPEN"]).order("created_at", { ascending: false });
+  if (!dupes?.length) return 0;
+  const idsToCancel = dupes.filter((d: any) => d.id !== keepId).map((d: any) => d.id);
+  if (idsToCancel.length === 0) return 0;
+  for (const id of idsToCancel) {
+    await supabase.from("paper_positions").update({ status: "CANCELED", close_reason: "CANCELED", closed_at: new Date().toISOString() }).eq("id", id);
+    await supabase.from("paper_orders").update({ status: "CANCELED" }).eq("position_id", id).in("status", ["NEW", "PARTIAL"]);
+    await emitEvent(null, "POSITION", id, "POSITION_CANCELED", { reason: "duplicate_replaced" });
+  }
+  return idsToCancel.length;
 }
 
 // ─── EMIT DECISION (GUARANTEED) ──────────────────────────────────
 async function emitDecision(
-  runId: string,
-  assetId: string,
-  timeframe: string,
-  context: {
-    currentPrice: number | null;
-    scenarios: any[];
-    agreementScore: number;
-    consensusScore: number;
-    completenessScore: number;
-    anomalyHalt: boolean;
-    haltReason: string | null;
-    evaluatedDecisions: number;
-    evaluatedTrades: number;
-    error: string | null;
-    regime?: string;
-  },
+  runId: string, assetId: string, timeframe: string,
+  context: { currentPrice: number | null; scenarios: any[]; agreementScore: number; consensusScore: number; completenessScore: number; anomalyHalt: boolean; haltReason: string | null; evaluatedDecisions: number; evaluatedTrades: number; error: string | null; regime?: string; },
   emittedBy: string = "UNKNOWN"
 ) {
   const horizon = routeHorizon(timeframe, context.regime);
@@ -285,78 +187,44 @@ async function emitDecision(
   const emittedAt = new Date().toISOString();
   const provenance = { emitted_by: emittedBy, emit_run_id: emitRunId, emitted_at: emittedAt };
 
-  // ── CANONICAL NORMALIZATION GATE ──────────────────────────────
-  // All score inputs are normalized once here so no downstream path can write invalid values.
   context.agreementScore = clampProbability(context.agreementScore, "emitDecision/agreementScore");
   context.consensusScore = clampProbability(context.consensusScore, "emitDecision/consensusScore");
   context.completenessScore = clampProbability(context.completenessScore, "emitDecision/completenessScore");
 
   await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "emitDecision called", { ...context, routed_horizon: horizon, emittedBy });
 
-  // A) If anomaly halt => PAUSED decision
+  // A) PAUSED
   if (context.anomalyHalt) {
     const decision = await supabase.from("paper_decisions").insert({
-      asset_id: assetId,
-      timeframe,
-      horizon,
-      ref_price: context.currentPrice || 0,
-      direction_pred: "NEUTRAL",
-      probability_pred: 0.5,
-      probability_raw: 0.5,
-      probability_source: "paused_fallback",
-      probability_components: { fallbackUsed: true, reason: "anomaly_halt" },
-      agreement_score: 0,
-      consensus_score: 0,
-      completeness_score: 0,
-      evidence_snapshot_json: {
-        run_id: runId,
-        decision_type: "PAUSED",
-        blockers: [context.haltReason || "System in HALT state"],
-        version_tag: VERSION_TAG,
-      },
-      ...provenance,
+      asset_id: assetId, timeframe, horizon, ref_price: context.currentPrice || 0,
+      direction_pred: "NEUTRAL", probability_pred: 0.5, probability_raw: 0.5,
+      probability_source: "paused_fallback", probability_components: { fallbackUsed: true, reason: "anomaly_halt" },
+      agreement_score: 0, consensus_score: 0, completeness_score: 0,
+      evidence_snapshot_json: { run_id: runId, decision_type: "PAUSED", blockers: [context.haltReason || "System in HALT state"], version_tag: VERSION_TAG },
+      decision_type: "PAUSED", version_tag: VERSION_TAG, ...provenance,
     }).select().single();
-
-    await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "PAUSED decision written", { id: decision.data?.id });
+    await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "PAUSED" });
     return { decision_type: "PAUSED", decision: decision.data };
   }
 
-  // B) If error
+  // B) ERROR
   if (context.error) {
     const decision = await supabase.from("paper_decisions").insert({
-      asset_id: assetId,
-      timeframe,
-      horizon,
-      ref_price: context.currentPrice || 0,
-      direction_pred: "NEUTRAL",
-      probability_pred: 0.5,
-      probability_raw: 0.5,
-      probability_source: "error_fallback",
-      probability_components: { fallbackUsed: true, reason: "error", error: context.error },
-      agreement_score: 0,
-      consensus_score: 0,
-      completeness_score: 0,
-      evidence_snapshot_json: {
-        run_id: runId,
-        decision_type: "ERROR",
-        blockers: [context.error],
-        version_tag: VERSION_TAG,
-      },
-      ...provenance,
+      asset_id: assetId, timeframe, horizon, ref_price: context.currentPrice || 0,
+      direction_pred: "NEUTRAL", probability_pred: 0.5, probability_raw: 0.5,
+      probability_source: "error_fallback", probability_components: { fallbackUsed: true, reason: "error", error: context.error },
+      agreement_score: 0, consensus_score: 0, completeness_score: 0,
+      evidence_snapshot_json: { run_id: runId, decision_type: "ERROR", blockers: [context.error], version_tag: VERSION_TAG },
+      decision_type: "ERROR", version_tag: VERSION_TAG, ...provenance,
     }).select().single();
-
-    await trace(runId, assetId, timeframe, "FINALIZE", "ERROR", "ERROR decision written", { id: decision.data?.id });
+    await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "ERROR" });
     return { decision_type: "ERROR", decision: decision.data };
   }
 
-  // C) Try to build a trade candidate from analysis data
+  // C) TRADE_CANDIDATE
   if (context.currentPrice && context.scenarios?.length > 0) {
     const best = context.scenarios[0];
     const evidence = best.evidence || [];
-    const hasBullish = evidence.some((e: any) => e.interpretation?.toLowerCase().includes("bullish"));
-    const hasBearish = evidence.some((e: any) => e.interpretation?.toLowerCase().includes("bearish"));
-
-    // Determine direction from scenario
     let direction = "NEUTRAL";
     if (best.type === "bullish") direction = "UP";
     else if (best.type === "bearish") direction = "DOWN";
@@ -364,141 +232,307 @@ async function emitDecision(
     const rawProbability = best.probability;
     const probability = clampProbability(rawProbability, "indicator-engine");
     const confidence = Math.round(probability * 100);
-
-    // Stuck probability detection
     await checkStuckProbability(assetId, probability);
 
     if (confidence >= 40 && direction !== "NEUTRAL") {
-      // TRADE_CANDIDATE
       const entryZone = best.entryZones?.[0];
       const stopLoss = best.stopLoss;
       const targets = best.targets || [];
 
       const decision = await supabase.from("paper_decisions").insert({
-        asset_id: assetId,
-        timeframe,
-        horizon,
-        ref_price: context.currentPrice,
-        direction_pred: direction,
-        probability_pred: probability,
-        probability_raw: rawProbability,
+        asset_id: assetId, timeframe, horizon, ref_price: context.currentPrice,
+        direction_pred: direction, probability_pred: probability, probability_raw: rawProbability,
         probability_source: "indicator-engine",
         probability_components: { bestProbRaw: rawProbability, bestProbNormalized: probability, agreementScore: context.agreementScore, consensusScore: context.consensusScore, completenessScore: context.completenessScore, evidenceCount: evidence.length, fallbackUsed: false },
-        agreement_score: context.agreementScore,
-        consensus_score: context.consensusScore,
-        completeness_score: context.completenessScore,
+        agreement_score: context.agreementScore, consensus_score: context.consensusScore, completeness_score: context.completenessScore,
         evidence_snapshot_json: {
-          run_id: runId,
-          decision_type: "TRADE_CANDIDATE",
-          direction,
-          confidence,
+          run_id: runId, decision_type: "TRADE_CANDIDATE", direction, confidence,
           entry_zone: entryZone ? { low: entryZone.priceRange?.[0], high: entryZone.priceRange?.[1] } : null,
-          stop_loss: stopLoss,
-          targets: targets.map((t: any) => ({ price: t.price, label: t.label })),
-          rationale: `${direction} signal with ${confidence}% confidence. Agreement: ${(context.agreementScore * 100).toFixed(0)}%, Consensus: ${(context.consensusScore * 100).toFixed(0)}%.`,
-          gates_snapshot: {
-            agreement: context.agreementScore,
-            consensus: context.consensusScore,
-            completeness: context.completenessScore,
-            anomaly_halt: false,
-          },
+          stop_loss: stopLoss, targets: targets.map((t: any) => ({ price: t.price, label: t.label })),
+          rationale: `${direction} signal with ${confidence}% confidence.`,
+          gates_snapshot: { agreement: context.agreementScore, consensus: context.consensusScore, completeness: context.completenessScore, anomaly_halt: false },
           version_tag: VERSION_TAG,
         },
-        ...provenance,
+        decision_type: "TRADE_CANDIDATE", version_tag: VERSION_TAG, ...provenance,
       }).select().single();
 
-      // Also create a paper trade
+      await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "TRADE_CANDIDATE", direction, probability });
+
+      // ── CREATE POSITION + ENTRY ORDER ──────────────────────
       if (entryZone && stopLoss && decision.data) {
-        const tradeDirection = direction;
-        const tradeHorizon = horizon;
-        const tradeDupeKey = buildDuplicateKey(assetId, tradeDirection, timeframe, tradeHorizon);
+        const policy = await getActivePolicy();
+        const side = direction === "UP" ? "LONG" : "SHORT";
 
-        const { data: tradeRow } = await supabase.from("paper_trades").insert({
-          decision_id: decision.data.id,
-          asset_id: assetId,
-          timeframe,
-          scenario_type: best.type || "bullish",
-          regime_label: best.regime || "Unknown",
-          entry_zone_low: entryZone.priceRange?.[0] || context.currentPrice * 0.99,
-          entry_zone_high: entryZone.priceRange?.[1] || context.currentPrice * 1.01,
-          trigger_rule: entryZone.trigger || "Price enters zone",
-          stop_level: stopLoss.level || context.currentPrice * 0.95,
-          stop_rule: stopLoss.condition || "Break below stop",
-          targets_json: targets.map((t: any) => ({ price: t.price })),
-          status: "PENDING",
-          evidence_snapshot_json: { run_id: runId },
-          duplicate_key: tradeDupeKey,
-          initial_probability_pred: probability,
-          initial_probability_source: "indicator-engine",
-        }).select().single();
+        // Policy gates
+        const policyBlockers: string[] = [];
+        if (policy) {
+          if (probability < (policy.min_prob || 0.35)) policyBlockers.push(`prob ${probability.toFixed(3)} < min_prob ${policy.min_prob}`);
+          if (!policy.allow_shorts && side === "SHORT") policyBlockers.push("shorts disabled by policy");
+          const exposure = await getExposure();
+          if (exposure.open >= (policy.max_open || 10)) policyBlockers.push(`max_open reached: ${exposure.open}`);
+          if (exposure.pending >= (policy.max_pending || 20)) policyBlockers.push(`max_pending reached: ${exposure.pending}`);
 
-        // Cancel older duplicates (KEEP_NEWEST)
-        if (tradeRow) {
-          await cancelOlderDuplicates(tradeDupeKey, tradeRow.id);
+          const entryPrice = ((entryZone.priceRange?.[0] || context.currentPrice * 0.99) + (entryZone.priceRange?.[1] || context.currentPrice * 1.01)) / 2;
+          const stopLevel = stopLoss.level || (side === "LONG" ? entryPrice * 0.97 : entryPrice * 1.03);
+          const tpLevel = targets[targets.length - 1]?.price || (side === "LONG" ? entryPrice * 1.05 : entryPrice * 0.95);
+          const riskDist = Math.abs(entryPrice - stopLevel);
+          const rewardDist = Math.abs(tpLevel - entryPrice);
+          const rr = riskDist > 0 ? rewardDist / riskDist : 0;
+          if (rr < (policy.min_rr || 1.2)) policyBlockers.push(`R:R ${rr.toFixed(2)} < min_rr ${policy.min_rr}`);
+        }
+
+        if (policyBlockers.length > 0) {
+          await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "Position blocked by policy", { policyBlockers });
+          await emitEvent(runId, "ENGINE", null, "POSITION_BLOCKED", { decision_id: decision.data.id, blockers: policyBlockers });
+        } else {
+          // Create position + entry order
+          const entryLow = entryZone.priceRange?.[0] || context.currentPrice * 0.99;
+          const entryHigh = entryZone.priceRange?.[1] || context.currentPrice * 1.01;
+          const limitPrice = side === "LONG" ? entryHigh : entryLow;
+          const stopLevel = stopLoss.level || (side === "LONG" ? context.currentPrice * 0.97 : context.currentPrice * 1.03);
+          const tpLevel = targets[targets.length - 1]?.price || (side === "LONG" ? context.currentPrice * 1.05 : context.currentPrice * 0.95);
+          const duplicateKey = buildDuplicateKey(assetId, side, timeframe, horizon);
+          const expiryMinutes = getExpiryMinutes(policy, timeframe);
+          const latencyMs = policy?.latency_ms || 250;
+
+          const { data: position } = await supabase.from("paper_positions").insert({
+            run_id: runId, policy_id: policy?.id, decision_id: decision.data.id,
+            symbol: assetId, side, timeframe, horizon, status: "PENDING_ENTRY", qty: 1,
+            stop_price: stopLevel, tp_price: tpLevel,
+            initial_probability_pred: probability, initial_probability_source: "indicator-engine",
+            regime_label: best.regime || "Unknown", duplicate_key: duplicateKey,
+            expires_at: new Date(Date.now() + expiryMinutes * 60_000).toISOString(),
+            meta: { run_id: runId, entry_zone: { low: entryLow, high: entryHigh } },
+          }).select().single();
+
+          if (position) {
+            const { data: entryOrder } = await supabase.from("paper_orders").insert({
+              run_id: runId, policy_id: policy?.id, symbol: assetId, side,
+              order_type: "LIMIT", qty: 1, limit_price: limitPrice, status: "NEW",
+              eligible_fill_at: new Date(Date.now() + latencyMs).toISOString(),
+              position_id: position.id, meta: { decision_id: decision.data.id },
+            }).select().single();
+
+            if (entryOrder) {
+              await supabase.from("paper_positions").update({ entry_order_id: entryOrder.id }).eq("id", position.id);
+            }
+            await cancelDuplicatePositions(duplicateKey, position.id);
+            await emitEvent(runId, "POSITION", position.id, "POSITION_CREATED", { symbol: assetId, side, probability });
+            if (entryOrder) await emitEvent(runId, "ORDER", entryOrder.id, "ORDER_PLACED", { type: "ENTRY", limit_price: limitPrice });
+          }
         }
       }
 
-      await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "TRADE_CANDIDATE decision written", { id: decision.data?.id, direction, confidence });
+      await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "TRADE_CANDIDATE written", { id: decision.data?.id, direction, confidence });
       return { decision_type: "TRADE_CANDIDATE", decision: decision.data };
     }
   }
 
-  // D) NO_TRADE fallback — always emit
+  // D) NO_TRADE fallback
   const blockers: string[] = [];
-  if (context.agreementScore < 0.5) blockers.push(`Low agreement score: ${(context.agreementScore * 100).toFixed(0)}%`);
-  if (context.consensusScore < 0.5) blockers.push(`Low consensus score: ${(context.consensusScore * 100).toFixed(0)}%`);
-  if (context.completenessScore < 0.5) blockers.push(`Low data completeness: ${(context.completenessScore * 100).toFixed(0)}%`);
-  if (!context.currentPrice) blockers.push("Could not fetch current price");
-  if (!context.scenarios?.length) blockers.push("No scenarios generated from analysis");
-  if (blockers.length === 0) blockers.push("Insufficient signal confidence for trade entry");
+  if (context.agreementScore < 0.5) blockers.push(`Low agreement: ${(context.agreementScore * 100).toFixed(0)}%`);
+  if (context.consensusScore < 0.5) blockers.push(`Low consensus: ${(context.consensusScore * 100).toFixed(0)}%`);
+  if (context.completenessScore < 0.5) blockers.push(`Low completeness: ${(context.completenessScore * 100).toFixed(0)}%`);
+  if (!context.currentPrice) blockers.push("No current price");
+  if (!context.scenarios?.length) blockers.push("No scenarios");
+  if (blockers.length === 0) blockers.push("Insufficient signal confidence");
 
   const decision = await supabase.from("paper_decisions").insert({
-    asset_id: assetId,
-    timeframe,
-    horizon,
-    ref_price: context.currentPrice || 0,
-    direction_pred: "NEUTRAL",
-    probability_pred: 0.3,
-    probability_raw: 0.3,
+    asset_id: assetId, timeframe, horizon, ref_price: context.currentPrice || 0,
+    direction_pred: "NEUTRAL", probability_pred: 0.3, probability_raw: 0.3,
     probability_source: "no_trade_fallback",
-    probability_components: { fallbackUsed: true, reason: "insufficient_signal", agreementScore: context.agreementScore, consensusScore: context.consensusScore, completenessScore: context.completenessScore, blockers },
-    agreement_score: context.agreementScore,
-    consensus_score: context.consensusScore,
-    completeness_score: context.completenessScore,
-    evidence_snapshot_json: {
-      run_id: runId,
-      decision_type: "NO_TRADE",
-      direction: "NONE",
-      confidence: 30,
-      rationale: `No trade: ${blockers.slice(0, 3).join(". ")}.`,
-      blockers,
-      gates_snapshot: {
-        agreement: context.agreementScore,
-        consensus: context.consensusScore,
-        completeness: context.completenessScore,
-        anomaly_halt: false,
-      },
-      version_tag: VERSION_TAG,
-    },
-    ...provenance,
+    probability_components: { fallbackUsed: true, reason: "insufficient_signal", blockers },
+    agreement_score: context.agreementScore, consensus_score: context.consensusScore, completeness_score: context.completenessScore,
+    evidence_snapshot_json: { run_id: runId, decision_type: "NO_TRADE", blockers, version_tag: VERSION_TAG },
+    decision_type: "NO_TRADE", version_tag: VERSION_TAG, ...provenance,
   }).select().single();
 
-  await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "NO_TRADE decision written", { id: decision.data?.id, blockers });
+  await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "NO_TRADE", blockers });
   return { decision_type: "NO_TRADE", decision: decision.data };
+}
+
+// ─── PROCESS EXECUTION (EXCHANGE SIMULATOR) ──────────────────────
+async function processExecution(assetId: string) {
+  const policy = await getActivePolicy();
+  const priceRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=market&symbols=${assetId}`);
+  const priceJson = await priceRes.json();
+  const currentPrice = priceJson.data?.[0]?.price;
+  if (!currentPrice) return { filled: 0, closed: 0, expired: 0 };
+
+  const now = new Date();
+  const feeBps = policy?.fee_bps || 6;
+  const slippageBps = policy?.slippage_bps || 4;
+  const worstCase = policy?.worst_case_same_candle ?? true;
+  let filled = 0, closed = 0, expired = 0;
+
+  // ── 1) Process PENDING_ENTRY positions ──────────────────────
+  const { data: pendingPositions } = await supabase.from("paper_positions").select("*")
+    .eq("symbol", assetId).eq("status", "PENDING_ENTRY").limit(50);
+
+  for (const pos of pendingPositions || []) {
+    // Check expiry
+    if (pos.expires_at && now > new Date(pos.expires_at)) {
+      await supabase.from("paper_positions").update({ status: "EXPIRED", close_reason: "EXPIRY", closed_at: now.toISOString() }).eq("id", pos.id);
+      if (pos.entry_order_id) await supabase.from("paper_orders").update({ status: "EXPIRED" }).eq("id", pos.entry_order_id);
+      await emitEvent(pos.run_id, "POSITION", pos.id, "POSITION_EXPIRED", { reason: "entry_window" });
+      expired++;
+      continue;
+    }
+
+    if (!pos.entry_order_id) continue;
+    const { data: entryOrder } = await supabase.from("paper_orders").select("*").eq("id", pos.entry_order_id).single();
+    if (!entryOrder || entryOrder.status !== "NEW") continue;
+    if (now < new Date(entryOrder.eligible_fill_at)) continue;
+
+    const isLong = pos.side === "LONG";
+    const fillable = isLong ? currentPrice <= entryOrder.limit_price : currentPrice >= entryOrder.limit_price;
+    if (!fillable) continue;
+
+    // Simulate fill with slippage + fees
+    const slippage = currentPrice * slippageBps / 10000;
+    const effectivePrice = isLong ? currentPrice + slippage : currentPrice - slippage;
+    const fee = effectivePrice * feeBps / 10000;
+
+    await supabase.from("paper_fills").insert({
+      order_id: entryOrder.id, position_id: pos.id, filled_qty: 1,
+      fill_price: effectivePrice, fee_paid: fee, slippage_paid: slippage,
+    });
+    await supabase.from("paper_orders").update({ status: "FILLED", filled_qty: 1, avg_fill_price: effectivePrice }).eq("id", entryOrder.id);
+
+    // eligible_close_at = next candle boundary (no same-candle close)
+    const tfMs = TF_MS[pos.timeframe] || TF_MS["4h"];
+    const eligibleCloseAt = new Date(now.getTime() + tfMs);
+
+    // Create OCO bracket (TP + SL)
+    const ocoGroupId = crypto.randomUUID();
+    const { data: tpOrder } = await supabase.from("paper_orders").insert({
+      run_id: pos.run_id, policy_id: pos.policy_id, symbol: pos.symbol, side: pos.side,
+      order_type: "TAKE_PROFIT", qty: 1, limit_price: pos.tp_price, status: "NEW",
+      oco_group_id: ocoGroupId, reduce_only: true, position_id: pos.id,
+    }).select().single();
+    const { data: slOrder } = await supabase.from("paper_orders").insert({
+      run_id: pos.run_id, policy_id: pos.policy_id, symbol: pos.symbol, side: pos.side,
+      order_type: "STOP_LOSS", qty: 1, stop_price: pos.stop_price, status: "NEW",
+      oco_group_id: ocoGroupId, reduce_only: true, position_id: pos.id,
+    }).select().single();
+
+    // Update position to OPEN
+    await supabase.from("paper_positions").update({
+      status: "OPEN", entry_price: effectivePrice, filled_at: now.toISOString(),
+      eligible_close_at: eligibleCloseAt.toISOString(),
+      tp_order_id: tpOrder?.id, sl_order_id: slOrder?.id,
+    }).eq("id", pos.id);
+
+    filled++;
+    await emitEvent(pos.run_id, "ORDER", entryOrder.id, "ORDER_FILLED", { price: effectivePrice, fee, slippage });
+    await emitEvent(pos.run_id, "POSITION", pos.id, "POSITION_OPENED", { entry_price: effectivePrice, eligible_close_at: eligibleCloseAt.toISOString() });
+    if (tpOrder) await emitEvent(pos.run_id, "ORDER", tpOrder.id, "TP_PLACED", { price: pos.tp_price });
+    if (slOrder) await emitEvent(pos.run_id, "ORDER", slOrder.id, "SL_PLACED", { price: pos.stop_price });
+  }
+
+  // ── 2) Process OPEN positions (TP/SL/EXPIRY) ───────────────
+  const { data: openPositions } = await supabase.from("paper_positions").select("*")
+    .eq("symbol", assetId).eq("status", "OPEN").limit(50);
+
+  for (const pos of openPositions || []) {
+    // Enforce eligible_close_at (no same-candle close)
+    if (pos.eligible_close_at && now < new Date(pos.eligible_close_at)) continue;
+
+    const isLong = pos.side === "LONG";
+    const riskR = Math.abs(pos.entry_price - pos.stop_price);
+    if (riskR === 0) continue;
+
+    const stopped = isLong ? currentPrice <= pos.stop_price : currentPrice >= pos.stop_price;
+    const tpHit = pos.tp_price && (isLong ? currentPrice >= pos.tp_price : currentPrice <= pos.tp_price);
+    const expiredPos = pos.expires_at && now > new Date(pos.expires_at);
+
+    if (!stopped && !tpHit && !expiredPos) continue;
+
+    // Determine close reason (worst-case for same-candle TP+SL)
+    let closeReason: string;
+    let exitPrice: number;
+    if (stopped && tpHit) {
+      closeReason = worstCase ? "SL" : "TP";
+      exitPrice = worstCase ? pos.stop_price : pos.tp_price;
+    } else if (stopped) {
+      closeReason = "SL"; exitPrice = pos.stop_price;
+    } else if (tpHit) {
+      closeReason = "TP"; exitPrice = pos.tp_price;
+    } else {
+      closeReason = "EXPIRY"; exitPrice = currentPrice;
+    }
+
+    // Apply exit slippage + fees
+    const exitSlippage = exitPrice * slippageBps / 10000;
+    const effectiveExit = isLong ? exitPrice - exitSlippage : exitPrice + exitSlippage;
+    const exitFee = effectiveExit * feeBps / 10000;
+
+    // Side-aware P&L
+    const pnl = isLong
+      ? (effectiveExit - pos.entry_price) - exitFee
+      : (pos.entry_price - effectiveExit) - exitFee;
+    const pnlPct = isLong
+      ? ((effectiveExit - pos.entry_price) / pos.entry_price) * 100
+      : ((pos.entry_price - effectiveExit) / pos.entry_price) * 100;
+    const realizedR = isLong
+      ? (effectiveExit - pos.entry_price) / riskR
+      : (pos.entry_price - effectiveExit) / riskR;
+
+    let outcome: string;
+    if (closeReason === "SL") outcome = "LOSS";
+    else if (closeReason === "TP") outcome = "WIN";
+    else outcome = pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "BREAKEVEN";
+
+    // Create exit fill for the triggered order
+    const exitOrderId = closeReason === "TP" ? pos.tp_order_id : closeReason === "SL" ? pos.sl_order_id : null;
+    if (exitOrderId) {
+      await supabase.from("paper_fills").insert({
+        order_id: exitOrderId, position_id: pos.id, filled_qty: 1,
+        fill_price: effectiveExit, fee_paid: exitFee, slippage_paid: exitSlippage,
+      });
+      await supabase.from("paper_orders").update({ status: "FILLED", filled_qty: 1, avg_fill_price: effectiveExit }).eq("id", exitOrderId);
+    }
+
+    // Cancel OCO counterpart
+    const cancelId = closeReason === "TP" ? pos.sl_order_id : closeReason === "SL" ? pos.tp_order_id : null;
+    if (cancelId) {
+      await supabase.from("paper_orders").update({ status: "CANCELED" }).eq("id", cancelId);
+      await emitEvent(pos.run_id, "ORDER", cancelId, "ORDER_CANCELED", { reason: "oco_counterpart" });
+    }
+    if (closeReason === "EXPIRY") {
+      if (pos.tp_order_id) await supabase.from("paper_orders").update({ status: "CANCELED" }).eq("id", pos.tp_order_id);
+      if (pos.sl_order_id) await supabase.from("paper_orders").update({ status: "CANCELED" }).eq("id", pos.sl_order_id);
+    }
+
+    // Close position
+    await supabase.from("paper_positions").update({
+      status: "CLOSED", close_reason: closeReason, exit_price: effectiveExit,
+      closed_at: now.toISOString(), realized_pnl: pnl, realized_r: realizedR,
+      realized_pct: pnlPct, outcome_label: outcome,
+    }).eq("id", pos.id);
+
+    closed++;
+    await emitEvent(pos.run_id, "POSITION", pos.id, "POSITION_CLOSED", {
+      close_reason: closeReason, exit_price: effectiveExit, realized_pnl: pnl, realized_r: realizedR, outcome,
+    });
+  }
+
+  // Diagnostics event
+  const exposure = await getExposure();
+  await emitEvent(null, "ENGINE", null, "ENGINE_TICK", {
+    asset: assetId, filled, closed, expired,
+    open_positions: exposure.open, pending_positions: exposure.pending,
+  });
+
+  if (closed > 0) await updateGraduation(assetId);
+  return { filled, closed, expired };
 }
 
 // ─── EVALUATE DECISIONS ───────────────────────────────────────────
 async function evaluateDecisions(asset_id: string, horizon?: string) {
-  let query = supabase
-    .from("paper_decisions")
-    .select("*")
-    .eq("asset_id", asset_id)
-    .is("evaluated_at", null)
-    .order("ts", { ascending: true })
-    .limit(100);
-
+  let query = supabase.from("paper_decisions").select("*").eq("asset_id", asset_id)
+    .is("evaluated_at", null).order("ts", { ascending: true }).limit(100);
   if (horizon) query = query.eq("horizon", horizon);
-
   const { data: decisions, error } = await query;
   if (error) throw error;
   if (!decisions?.length) return { evaluated: 0 };
@@ -506,7 +540,7 @@ async function evaluateDecisions(asset_id: string, horizon?: string) {
   const priceRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=market&symbols=${asset_id}`);
   const priceJson = await priceRes.json();
   const currentPrice = priceJson.data?.[0]?.price;
-  if (!currentPrice) return { evaluated: 0, error: "Could not fetch current price" };
+  if (!currentPrice) return { evaluated: 0, error: "No current price" };
 
   const klinesRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=analysis&symbols=${asset_id}`);
   const klinesJson = await klinesRes.json();
@@ -533,14 +567,10 @@ async function evaluateDecisions(asset_id: string, horizon?: string) {
     else realizedDir = "NEUTRAL";
 
     const correct = d.direction_pred === realizedDir;
-
     await supabase.from("paper_decisions").update({
-      realized_dir: realizedDir,
-      realized_move_pct: movePct * 100,
-      evaluated_at: now.toISOString(),
-      correct,
+      realized_dir: realizedDir, realized_move_pct: movePct * 100,
+      evaluated_at: now.toISOString(), correct,
     }).eq("id", d.id);
-
     evaluated++;
   }
 
@@ -548,146 +578,26 @@ async function evaluateDecisions(asset_id: string, horizon?: string) {
   for (const h of horizonsToUpdate) {
     await updateGraduation(asset_id, decisions[0]?.timeframe || "4h", h);
   }
-
   return { evaluated };
 }
 
-// ─── EVALUATE TRADES ──────────────────────────────────────────────
-async function evaluateTrades(asset_id: string) {
-  const priceRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=market&symbols=${asset_id}`);
-  const priceJson = await priceRes.json();
-  const currentPrice = priceJson.data?.[0]?.price;
-  if (!currentPrice) return { evaluated: 0 };
-
-  const { data: pending } = await supabase
-    .from("paper_trades")
-    .select("*")
-    .eq("asset_id", asset_id)
-    .eq("status", "PENDING")
-    .limit(50);
-
-  let filled = 0, closed = 0;
-
-  for (const t of pending || []) {
-    const isBull = t.scenario_type === "bullish";
-    // LONG: fillable when price drops to/below entry zone top
-    // SHORT: fillable when price rises to/above entry zone bottom
-    const fillable = isBull
-      ? (currentPrice <= t.entry_zone_high)
-      : (currentPrice >= t.entry_zone_low);
-
-    if (fillable) {
-      await supabase.from("paper_trades").update({
-        status: "OPEN",
-        fill_price: currentPrice,
-        ts_opened: new Date().toISOString(),
-      }).eq("id", t.id);
-      filled++;
-    } else if (t.time_window_end && new Date() > new Date(t.time_window_end)) {
-      await supabase.from("paper_trades").update({
-        status: "CLOSED",
-        ts_closed: new Date().toISOString(),
-        outcome_label: "EXPIRED",
-        return_pct: 0,
-        return_r: 0,
-      }).eq("id", t.id);
-      closed++;
-    }
-  }
-
-  const { data: open } = await supabase
-    .from("paper_trades")
-    .select("*")
-    .eq("asset_id", asset_id)
-    .eq("status", "OPEN")
-    .limit(50);
-
-  for (const t of open || []) {
-    const isBull = t.scenario_type === "bullish";
-    const riskR = Math.abs(t.fill_price - t.stop_level);
-    if (riskR === 0) continue;
-
-    const currentR = isBull
-      ? (currentPrice - t.fill_price) / riskR
-      : (t.fill_price - currentPrice) / riskR;
-
-    const stopped = isBull ? currentPrice <= t.stop_level : currentPrice >= t.stop_level;
-    const targets = (t.targets_json || []) as { price: number }[];
-    const lastTarget = targets[targets.length - 1];
-    const targetHit = lastTarget && (isBull ? currentPrice >= lastTarget.price : currentPrice <= lastTarget.price);
-    const expired = t.time_window_end && new Date() > new Date(t.time_window_end);
-
-    if (stopped || targetHit || expired) {
-      const returnPct = isBull
-        ? ((currentPrice - t.fill_price) / t.fill_price) * 100
-        : ((t.fill_price - currentPrice) / t.fill_price) * 100;
-
-      let outcome: string;
-      if (stopped) outcome = "LOSS";
-      else if (targetHit) outcome = "WIN";
-      else if (Math.abs(returnPct) < 0.1) outcome = "BREAKEVEN";
-      else outcome = returnPct > 0 ? "WIN" : "LOSS";
-
-      await supabase.from("paper_trades").update({
-        status: "CLOSED",
-        ts_closed: new Date().toISOString(),
-        exit_price: currentPrice,
-        outcome_label: outcome,
-        return_pct: returnPct,
-        return_r: currentR,
-        mae_r: Math.min(0, currentR),
-        mfe_r: Math.max(0, currentR),
-      }).eq("id", t.id);
-      closed++;
-    }
-  }
-
-  if (closed > 0) await updateGraduation(asset_id);
-  return { filled, closed };
-}
-
 // ─── UPDATE GRADUATION ───────────────────────────────────────────
+// Queries paper_trades VIEW (which bridges legacy + new positions)
 async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "24h") {
-  const { count: nDecisions } = await supabase
-    .from("paper_decisions")
-    .select("*", { count: "exact", head: true })
-    .eq("asset_id", asset_id)
-    .eq("timeframe", timeframe)
-    .eq("horizon", horizon);
-
-  const { count: nCorrect } = await supabase
-    .from("paper_decisions")
-    .select("*", { count: "exact", head: true })
-    .eq("asset_id", asset_id)
-    .eq("timeframe", timeframe)
-    .eq("horizon", horizon)
-    .not("evaluated_at", "is", null)
-    .eq("correct", true);
-
-  const { count: nEvaluated } = await supabase
-    .from("paper_decisions")
-    .select("*", { count: "exact", head: true })
-    .eq("asset_id", asset_id)
-    .eq("timeframe", timeframe)
-    .eq("horizon", horizon)
-    .not("evaluated_at", "is", null);
+  const { count: nDecisions } = await supabase.from("paper_decisions").select("*", { count: "exact", head: true })
+    .eq("asset_id", asset_id).eq("timeframe", timeframe).eq("horizon", horizon);
+  const { count: nCorrect } = await supabase.from("paper_decisions").select("*", { count: "exact", head: true })
+    .eq("asset_id", asset_id).eq("timeframe", timeframe).eq("horizon", horizon).not("evaluated_at", "is", null).eq("correct", true);
+  const { count: nEvaluated } = await supabase.from("paper_decisions").select("*", { count: "exact", head: true })
+    .eq("asset_id", asset_id).eq("timeframe", timeframe).eq("horizon", horizon).not("evaluated_at", "is", null);
 
   const dirAcc = (nEvaluated || 0) > 0 ? (nCorrect || 0) / (nEvaluated || 1) : 0;
 
-  const { data: closedTrades } = await supabase
-    .from("paper_trades")
-    .select("return_r")
-    .eq("asset_id", asset_id)
-    .eq("timeframe", timeframe)
-    .eq("status", "CLOSED")
-    .not("return_r", "is", null);
-
-  const { count: nOpened } = await supabase
-    .from("paper_trades")
-    .select("*", { count: "exact", head: true })
-    .eq("asset_id", asset_id)
-    .eq("timeframe", timeframe)
-    .in("status", ["OPEN", "CLOSED"]);
+  // Query paper_trades VIEW for closed trade stats (includes both legacy + positions)
+  const { data: closedTrades } = await supabase.from("paper_trades").select("return_r")
+    .eq("asset_id", asset_id).eq("timeframe", timeframe).eq("status", "CLOSED").not("return_r", "is", null);
+  const { count: nOpened } = await supabase.from("paper_trades").select("*", { count: "exact", head: true })
+    .eq("asset_id", asset_id).eq("timeframe", timeframe).in("status", ["OPEN", "CLOSED"]);
 
   const returns = (closedTrades || []).map(t => t.return_r as number).filter(r => r !== null);
   const avgR = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
@@ -695,47 +605,23 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
   const medianR = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
 
   let level = 0;
-
   const isBhHorizon = LEARNING_HORIZONS.includes(horizon);
   if (isBhHorizon && horizon === "3m") {
-    if (
-      dirAcc >= BH_L1_FAST_GATES.minDirAcc &&
-      avgR > BH_L1_FAST_GATES.minEvBh &&
-      (nDecisions || 0) >= BH_L1_FAST_GATES.minDecisions
-    ) {
-      level = 1;
-    }
+    if (dirAcc >= BH_L1_FAST_GATES.minDirAcc && avgR > BH_L1_FAST_GATES.minEvBh && (nDecisions || 0) >= BH_L1_FAST_GATES.minDecisions) level = 1;
   }
-
   for (let l = 3; l >= 1; l--) {
     const gate = GRADUATION_GATES[l as 1 | 2 | 3];
-    if (
-      (nDecisions || 0) >= gate.minDecisions &&
-      (nOpened || 0) >= gate.minTrades &&
-      dirAcc >= gate.minDirAcc &&
-      avgR >= gate.minAvgR
-    ) {
-      level = Math.max(level, l);
-      break;
+    if ((nDecisions || 0) >= gate.minDecisions && (nOpened || 0) >= gate.minTrades && dirAcc >= gate.minDirAcc && avgR >= gate.minAvgR) {
+      level = Math.max(level, l); break;
     }
   }
-
-  if (horizon === "3m" && level > 1) {
-    level = 1;
-  }
+  if (horizon === "3m" && level > 1) level = 1;
 
   await supabase.from("graduation_status").upsert({
-    asset_id, timeframe, horizon,
-    n_decisions: nDecisions || 0,
-    n_opened_trades: nOpened || 0,
-    dir_acc: dirAcc,
-    avg_return_r: avgR,
-    median_r: medianR,
-    graduation_level: level,
-    influence_mode: INFLUENCE_MODES[level],
-    last_drift_check: new Date().toISOString(),
-    integrity_gating_pass: dirAcc >= 0.55,
-    updated_at: new Date().toISOString(),
+    asset_id, timeframe, horizon, n_decisions: nDecisions || 0, n_opened_trades: nOpened || 0,
+    dir_acc: dirAcc, avg_return_r: avgR, median_r: medianR, graduation_level: level,
+    influence_mode: INFLUENCE_MODES[level], last_drift_check: new Date().toISOString(),
+    integrity_gating_pass: dirAcc >= 0.55, updated_at: new Date().toISOString(),
   }, { onConflict: "asset_id,timeframe,horizon" });
 
   return { level, dirAcc, avgR, medianR, nDecisions, nOpened, horizon };
@@ -744,6 +630,7 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
 // ─── FETCH STATS ──────────────────────────────────────────────────
 async function fetchStats(asset_id?: string, includeLearning = false) {
   let decisionsQuery = supabase.from("paper_decisions").select("*").order("ts", { ascending: false }).limit(200);
+  // paper_trades is now a VIEW bridging legacy + positions
   let tradesQuery = supabase.from("paper_trades").select("*").order("ts_created", { ascending: false }).limit(200);
   let gradQuery = supabase.from("graduation_status").select("*");
 
@@ -753,9 +640,16 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     gradQuery = gradQuery.eq("asset_id", asset_id);
   }
 
-  const [decisions, trades, graduation] = await Promise.all([
-    decisionsQuery, tradesQuery, gradQuery,
+  // Fetch positions (new system) + events + policy
+  let positionsQuery = supabase.from("paper_positions").select("*").order("created_at", { ascending: false }).limit(200);
+  let eventsQuery = supabase.from("paper_engine_events").select("*").order("ts", { ascending: false }).limit(100);
+  if (asset_id) positionsQuery = positionsQuery.eq("symbol", asset_id);
+
+  const [decisions, trades, graduation, positions, events] = await Promise.all([
+    decisionsQuery, tradesQuery, gradQuery, positionsQuery, eventsQuery,
   ]);
+
+  const { data: policyData } = await supabase.from("paper_policy").select("*").eq("is_active", true).order("created_at", { ascending: false }).limit(1);
 
   const evaluated = (decisions.data || []).filter(d => d.evaluated_at);
   const confusionMatrix = { UP: { UP: 0, DOWN: 0, NEUTRAL: 0 }, DOWN: { UP: 0, DOWN: 0, NEUTRAL: 0 }, NEUTRAL: { UP: 0, DOWN: 0, NEUTRAL: 0 } };
@@ -765,8 +659,8 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     }
   }
 
-  const closedTrades = (trades.data || []).filter(t => t.status === "CLOSED" && t.mae_r !== null);
-  const maeDistribution = closedTrades.map(t => t.mae_r);
+  const closedTradesData = (trades.data || []).filter(t => t.status === "CLOSED" && t.mae_r !== null);
+  const maeDistribution = closedTradesData.map(t => t.mae_r);
 
   const bhHorizonStats: Record<string, any> = {};
   for (const h of LEARNING_HORIZONS) {
@@ -775,119 +669,76 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     const hCorrect = hEvaluated.filter(d => d.correct);
     const hDirAcc = hEvaluated.length > 0 ? hCorrect.length / hEvaluated.length : 0;
     const hGrad = (graduation.data || []).find(g => g.horizon === h);
-
     bhHorizonStats[h] = {
-      totalDecisions: hDecisions.length,
-      evaluatedDecisions: hEvaluated.length,
-      correctDecisions: hCorrect.length,
-      dirAcc: hDirAcc,
-      avgReturnR: hGrad?.avg_return_r ?? 0,
-      graduationLevel: hGrad?.graduation_level ?? 0,
-      cadence: CADENCE_MAP[h] || "monthly",
-      isLearningOnly: !PUBLIC_HORIZONS.includes(h),
-      contributedToL1: h === "3m" && hGrad?.graduation_level === 1 &&
-        hDirAcc >= BH_L1_FAST_GATES.minDirAcc &&
-        hDecisions.length >= BH_L1_FAST_GATES.minDecisions,
+      totalDecisions: hDecisions.length, evaluatedDecisions: hEvaluated.length, correctDecisions: hCorrect.length,
+      dirAcc: hDirAcc, avgReturnR: hGrad?.avg_return_r ?? 0, graduationLevel: hGrad?.graduation_level ?? 0,
+      cadence: CADENCE_MAP[h] || "monthly", isLearningOnly: !PUBLIC_HORIZONS.includes(h),
+      contributedToL1: h === "3m" && hGrad?.graduation_level === 1 && hDirAcc >= BH_L1_FAST_GATES.minDirAcc && hDecisions.length >= BH_L1_FAST_GATES.minDecisions,
     };
   }
 
-  // Fetch latest evaluation run
   let lastRunQuery = supabase.from("evaluation_runs").select("*").order("created_at", { ascending: false }).limit(1);
   if (asset_id) lastRunQuery = lastRunQuery.eq("asset_id", asset_id);
   const { data: lastRunData } = await lastRunQuery;
 
-  // Fetch timeframe stats for this asset
   let tfStatsQuery = supabase.from("timeframe_stats").select("*").order("success_likelihood_score", { ascending: false });
   if (asset_id) tfStatsQuery = tfStatsQuery.eq("asset_id", asset_id);
   const { data: tfStatsData } = await tfStatsQuery;
 
-  // Get best timeframe
   const matureTfs = (tfStatsData || []).filter(t => (t.trades_n || 0) >= 30);
   const bestTf = matureTfs.length > 0 ? matureTfs[0].timeframe : null;
 
   return {
-    decisions: decisions.data || [],
-    trades: trades.data || [],
-    graduation: graduation.data || [],
-    confusionMatrix,
-    maeDistribution,
-    bhHorizonStats,
-    lastRun: lastRunData?.[0] || null,
-    timeframeStats: tfStatsData || [],
-    bestTimeframe: bestTf,
-    config: {
-      publicHorizons: PUBLIC_HORIZONS,
-      learningHorizons: LEARNING_HORIZONS,
-      cadenceMap: CADENCE_MAP,
-    },
+    decisions: decisions.data || [], trades: trades.data || [], graduation: graduation.data || [],
+    confusionMatrix, maeDistribution, bhHorizonStats,
+    lastRun: lastRunData?.[0] || null, timeframeStats: tfStatsData || [], bestTimeframe: bestTf,
+    config: { publicHorizons: PUBLIC_HORIZONS, learningHorizons: LEARNING_HORIZONS, cadenceMap: CADENCE_MAP },
+    // New exchange fields
+    positions: positions.data || [],
+    events: events.data || [],
+    policy: policyData?.[0] || null,
   };
 }
 
-// ─── FULL EVALUATE PIPELINE (WITH DECISION EMISSION) ──────────────
+// ─── FULL EVALUATE PIPELINE ──────────────────────────────────────
 async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: string, emittedBy: string = "UNKNOWN") {
-  // Cadence guard: block if too soon (except MANUAL)
   const guard = await checkCadenceGuard(emittedBy);
   if (!guard.allowed) {
-    console.log(`[ATLAS] Cadence guard blocked: ${guard.reason}`);
-    return {
-      run_id: null,
-      status: "CADENCE_BLOCKED",
-      decision_type: "SKIPPED",
-      reason: guard.reason,
-    };
+    return { run_id: null, status: "CADENCE_BLOCKED", decision_type: "SKIPPED", reason: guard.reason };
   }
-  // Create evaluation run
-  const { data: runRow } = await supabase.from("evaluation_runs").insert({
-    asset_id,
-    timeframe,
-    status: "STARTED",
-    progress_0_100: 0,
-  }).select().single();
 
+  const { data: runRow } = await supabase.from("evaluation_runs").insert({
+    asset_id, timeframe, status: "STARTED", progress_0_100: 0,
+  }).select().single();
   const runId = runRow?.run_id || crypto.randomUUID();
 
   await trace(runId, asset_id, timeframe, "BOOTSTRAP", "INFO", "Evaluation started", { horizon, version: VERSION_TAG });
 
   let currentPrice: number | null = null;
   let scenarios: any[] = [];
-  let agreementScore = 0;
-  let consensusScore = 0;
-  let completenessScore = 0;
-  let anomalyHalt = false;
-  let haltReason: string | null = null;
-  let evalError: string | null = null;
+  let agreementScore = 0, consensusScore = 0, completenessScore = 0;
+  let anomalyHalt = false, haltReason: string | null = null, evalError: string | null = null;
 
   try {
-    // Phase: DATA_FETCH
     await trace(runId, asset_id, timeframe, "DATA_FETCH", "INFO", "Fetching market data");
     const priceRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=market&symbols=${asset_id}`);
     const priceJson = await priceRes.json();
     currentPrice = priceJson.data?.[0]?.price || null;
-    await trace(runId, asset_id, timeframe, "DATA_FETCH", "INFO", "Market data fetched", { price: currentPrice });
 
-    // Phase: DATA_CLEAN - check system status
     await trace(runId, asset_id, timeframe, "DATA_CLEAN", "INFO", "Checking system status");
     const { data: sysStatus } = await supabase.from("system_status").select("*").eq("asset_id", asset_id).maybeSingle();
-    if (sysStatus?.anomaly_halt) {
-      anomalyHalt = true;
-      haltReason = sysStatus.reason || "System in HALT state";
-    }
+    if (sysStatus?.anomaly_halt) { anomalyHalt = true; haltReason = sysStatus.reason || "System in HALT state"; }
 
-    // Phase: INDICATORS - fetch analysis
     await trace(runId, asset_id, timeframe, "INDICATORS", "INFO", "Running analysis");
     const analysisRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=analysis&symbols=${asset_id}`);
     const analysisJson = await analysisRes.json();
     scenarios = analysisJson.data?.scenarios || [];
-    await trace(runId, asset_id, timeframe, "INDICATORS", "INFO", "Analysis complete", { scenarioCount: scenarios.length });
-    // Detect regime from best scenario
     const detectedRegime = scenarios[0]?.regime || undefined;
 
     if (scenarios.length > 0) {
       const best = scenarios[0];
       const evidenceCount = best.evidence?.length || 0;
       completenessScore = Math.min(1, evidenceCount / 8);
-
-      // Simple agreement: how many evidence items agree with scenario direction
       const agreeCount = (best.evidence || []).filter((e: any) => {
         const interp = (e.interpretation || "").toLowerCase();
         if (best.type === "bullish") return interp.includes("bullish") || interp.includes("positive");
@@ -897,87 +748,49 @@ async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: 
       agreementScore = evidenceCount > 0 ? agreeCount / evidenceCount : 0;
       consensusScore = clampProbability(best.probability, "CONSENSUS_BUILD/best.probability");
     }
-    await trace(runId, asset_id, timeframe, "CONSENSUS_BUILD", "INFO", "Consensus computed", { agreementScore, consensusScore, completenessScore });
 
-    // Evaluate existing pending decisions
-    const [decResult, tradeResult] = await Promise.all([
+    // Evaluate existing decisions + process execution (fills/exits)
+    const [decResult, execResult] = await Promise.all([
       evaluateDecisions(asset_id, horizon),
-      evaluateTrades(asset_id),
+      processExecution(asset_id),
     ]);
-    await trace(runId, asset_id, timeframe, "CROSS_REFERENCE", "INFO", "Existing decisions/trades evaluated", { decisions: decResult, trades: tradeResult });
+    await trace(runId, asset_id, timeframe, "CROSS_REFERENCE", "INFO", "Evaluated + executed", { decisions: decResult, execution: execResult });
 
-    // Phase: FINALIZE - emit guaranteed decision
+    // Emit guaranteed decision
     const emitResult = await emitDecision(runId, asset_id, timeframe, {
-      currentPrice,
-      scenarios,
-      agreementScore,
-      consensusScore,
-      completenessScore,
-      anomalyHalt,
-      haltReason,
-      evaluatedDecisions: decResult.evaluated,
-      evaluatedTrades: (tradeResult as any).filled + (tradeResult as any).closed,
-      error: null,
-      regime: detectedRegime,
+      currentPrice, scenarios, agreementScore, consensusScore, completenessScore,
+      anomalyHalt, haltReason, evaluatedDecisions: decResult.evaluated,
+      evaluatedTrades: (execResult.filled || 0) + (execResult.closed || 0),
+      error: null, regime: detectedRegime,
     }, emittedBy);
 
-    // Update run as completed
     await supabase.from("evaluation_runs").update({
-      status: "COMPLETED",
-      progress_0_100: 100,
-      final_phase: "FINALIZE",
-      decisions_written_n: 1,
-      updated_at: new Date().toISOString(),
+      status: "COMPLETED", progress_0_100: 100, final_phase: "FINALIZE",
+      decisions_written_n: 1, updated_at: new Date().toISOString(),
     }).eq("run_id", runId);
 
-    await trace(runId, asset_id, timeframe, "FINALIZE", "INFO", "Evaluation completed", { decision_type: emitResult.decision_type });
-
     return {
-      run_id: runId,
-      status: "COMPLETED",
-      decisions_written: 1,
-      decision_type: emitResult.decision_type,
-      decision: emitResult.decision,
-      evaluated_existing: {
-        decisions: decResult,
-        trades: tradeResult,
-      },
+      run_id: runId, status: "COMPLETED", decisions_written: 1,
+      decision_type: emitResult.decision_type, decision: emitResult.decision,
+      evaluated_existing: { decisions: decResult, execution: execResult },
     };
 
   } catch (err) {
     evalError = (err as Error).message;
-    await trace(runId, asset_id, timeframe, "FINALIZE", "ERROR", `Evaluation error: ${evalError}`);
+    await trace(runId, asset_id, timeframe, "FINALIZE", "ERROR", `Error: ${evalError}`);
 
-    // Still emit an ERROR decision
     const emitResult = await emitDecision(runId, asset_id, timeframe, {
-      currentPrice,
-      scenarios,
-      agreementScore,
-      consensusScore,
-      completenessScore,
-      anomalyHalt,
-      haltReason,
-      evaluatedDecisions: 0,
-      evaluatedTrades: 0,
-      error: evalError,
-      regime: undefined,
+      currentPrice, scenarios, agreementScore, consensusScore, completenessScore,
+      anomalyHalt, haltReason, evaluatedDecisions: 0, evaluatedTrades: 0,
+      error: evalError, regime: undefined,
     }, emittedBy);
 
     await supabase.from("evaluation_runs").update({
-      status: "ERROR",
-      progress_0_100: 0,
-      error_text: evalError,
-      decisions_written_n: 1,
-      updated_at: new Date().toISOString(),
+      status: "ERROR", progress_0_100: 0, error_text: evalError,
+      decisions_written_n: 1, updated_at: new Date().toISOString(),
     }).eq("run_id", runId);
 
-    return {
-      run_id: runId,
-      status: "ERROR",
-      decisions_written: 1,
-      decision_type: emitResult.decision_type,
-      error: evalError,
-    };
+    return { run_id: runId, status: "ERROR", decisions_written: 1, decision_type: emitResult.decision_type, error: evalError };
   }
 }
 
@@ -996,9 +809,7 @@ function parseHorizon(horizon: string): number {
 
 // ─── MAIN HANDLER ─────────────────────────────────────────────────
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const url = new URL(req.url);
@@ -1008,25 +819,13 @@ serve(async (req) => {
 
     if (action === "stats") {
       const stats = await fetchStats(asset || undefined, includeLearning);
-      return new Response(JSON.stringify({ data: stats }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ data: stats }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "record-decision") {
       const body = await req.json();
       const result = await recordDecision(body);
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (action === "record-trade") {
-      const body = await req.json();
-      const result = await recordTrade(body);
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ data: result }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "evaluate") {
@@ -1035,36 +834,54 @@ serve(async (req) => {
       const timeframe = url.searchParams.get("timeframe") || "4h";
       const emittedBy = url.searchParams.get("emitted_by") || "UNKNOWN";
       const result = await runFullEvaluation(asset, timeframe, horizon, emittedBy);
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ data: result }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "graduation") {
       if (!asset) throw new Error("asset parameter required");
       const horizon = url.searchParams.get("horizon") || "24h";
       const result = await updateGraduation(asset, "4h", horizon);
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ data: result }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "last-run") {
       let query = supabase.from("evaluation_runs").select("*").order("created_at", { ascending: false }).limit(1);
       if (asset) query = query.eq("asset_id", asset);
       const { data } = await query;
-      return new Response(JSON.stringify({ data: data?.[0] || null }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ data: data?.[0] || null }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "trace") {
       const runId = url.searchParams.get("run_id");
       if (!runId) throw new Error("run_id parameter required");
       const { data } = await supabase.from("debug_trace_events").select("*").eq("run_id", runId).order("ts", { ascending: true }).limit(100);
-      return new Response(JSON.stringify({ data: data || [] }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ data: data || [] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "events") {
+      let query = supabase.from("paper_engine_events").select("*").order("ts", { ascending: false }).limit(200);
+      const entityType = url.searchParams.get("entity_type");
+      const entityId = url.searchParams.get("entity_id");
+      const runId = url.searchParams.get("run_id");
+      if (entityType) query = query.eq("entity_type", entityType);
+      if (entityId) query = query.eq("entity_id", entityId);
+      if (runId) query = query.eq("run_id", runId);
+      const { data } = await query;
+      return new Response(JSON.stringify({ data: data || [] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "positions") {
+      let query = supabase.from("paper_positions").select("*").order("created_at", { ascending: false }).limit(200);
+      if (asset) query = query.eq("symbol", asset);
+      const statusFilter = url.searchParams.get("status");
+      if (statusFilter) query = query.eq("status", statusFilter);
+      const { data } = await query;
+      return new Response(JSON.stringify({ data: data || [] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "policy") {
+      const policy = await getActivePolicy();
+      return new Response(JSON.stringify({ data: policy }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ error: "Unknown action: " + action }), {

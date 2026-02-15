@@ -31,6 +31,7 @@ import RunAnalysisEmptyState from "@/components/RunAnalysisEmptyState";
 import BestTimeframeBadge from "@/components/BestTimeframeBadge";
 import TimeframePerformancePanel from "@/components/TimeframePerformancePanel";
 import DetailPanel, { type SelectedItem } from "@/components/paper-trades/DetailPanel";
+import EngineTimeline from "@/components/paper-trades/EngineTimeline";
 import { useIncorporatedAssets, runAutoEvalTick } from "@/hooks/use-auto-eval";
 import { type EvalCadence, CADENCE_OPTIONS } from "@/lib/eval-cadence";
 import { useAutoEvaluationScheduler } from "@/hooks/use-auto-eval-scheduler";
@@ -60,6 +61,7 @@ export default function PaperTrades() {
   const graduation = stats?.graduation || [];
   const confusionMatrix = stats?.confusionMatrix || { UP: { UP: 0, DOWN: 0, NEUTRAL: 0 }, DOWN: { UP: 0, DOWN: 0, NEUTRAL: 0 }, NEUTRAL: { UP: 0, DOWN: 0, NEUTRAL: 0 } };
   const bhHorizonStats = stats?.bhHorizonStats || {};
+  const engineEvents = stats?.events || [];
   const config = stats?.config || { publicHorizons: ["6m", "1y", "3y", "5y"], learningHorizons: ["3m", "6m", "1y", "3y", "5y"], cadenceMap: {} };
 
   // Deduplicate active trades
@@ -204,6 +206,7 @@ export default function PaperTrades() {
               <TabsTrigger value="pattern-tiers" className="text-[10px] gap-1"><ShieldAlert className="h-3 w-3" />Tiers</TabsTrigger>
               <TabsTrigger value="anomalies" className="text-[10px] gap-1"><Scan className="h-3 w-3" />Anomalies</TabsTrigger>
               <TabsTrigger value="tf-performance" className="text-[10px] gap-1"><Timer className="h-3 w-3" />TF Perf</TabsTrigger>
+              <TabsTrigger value="engine-events" className="text-[10px] gap-1"><Zap className="h-3 w-3" />Events</TabsTrigger>
             </TabsList>
           </div>
 
@@ -524,6 +527,7 @@ export default function PaperTrades() {
           <TabsContent value="pattern-tiers" className="mt-3"><PatternTierPanel selectedAsset={selectedAsset} /></TabsContent>
           <TabsContent value="anomalies" className="mt-3"><AnomalyPanel selectedAsset={selectedAsset} /></TabsContent>
           <TabsContent value="tf-performance" className="mt-3"><TimeframePerformancePanel asset={selectedAsset} /></TabsContent>
+          <TabsContent value="engine-events" className="mt-3"><EngineTimeline events={engineEvents} /></TabsContent>
         </Tabs>
       </div>
 
