@@ -597,6 +597,18 @@ function DecisionRow({ d, selected, onClick, debugProb = false }: { d: any; sele
             <Badge variant="outline" className="text-[8px] font-mono py-0 h-4 border-primary/30 text-primary">
               SRC {d.probability_source || "—"}
             </Badge>
+            {d.probability_components && typeof d.probability_components === "object" && (
+              <div className="w-full mt-1 rounded border border-primary/20 bg-primary/5 p-1.5 space-y-0.5">
+                {Object.entries(d.probability_components as Record<string, unknown>).map(([k, v]) => (
+                  <div key={k} className="flex justify-between text-[8px] font-mono">
+                    <span className="text-muted-foreground">{k}</span>
+                    <span className="text-primary font-bold">
+                      {typeof v === "number" ? (Number.isInteger(v) ? v : Number(v).toFixed(4)) : String(v ?? "—")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
         <span className="text-[9px] font-mono text-muted-foreground ml-auto truncate">
