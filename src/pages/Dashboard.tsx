@@ -6,6 +6,7 @@ import ScenarioCard from '@/components/ScenarioCard';
 import ConsensusReport from '@/components/ConsensusReport';
 import EvidenceTable from '@/components/EvidenceTable';
 import WhaleTable from '@/components/WhaleTable';
+import CandlestickChart from '@/components/CandlestickChart';
 import { Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -53,6 +54,11 @@ export default function Dashboard() {
       ) : (
         <>
           <AssetHeader asset={asset} />
+
+          {/* Candlestick Chart */}
+          {analysis?.chartData && analysis.chartData.length > 0 && (
+            <CandlestickChart data={analysis.chartData} symbol={asset.symbol} />
+          )}
 
           {/* Scenarios */}
           <section>
