@@ -1,11 +1,10 @@
-import { useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Target, Loader2, CheckCircle2, AlertTriangle, RotateCcw } from "lucide-react";
-import { useEvaluate } from "@/hooks/use-paper-engine";
-import { useEvaluationProgress, type EvalStatus } from "@/hooks/use-evaluation-progress";
+import { useRunEvaluation } from "@/hooks/use-run-evaluation";
+import type { EvalStatus } from "@/hooks/use-evaluation-progress";
 
 interface EvaluateButtonProps {
   selectedAsset?: string;
@@ -24,51 +23,16 @@ const STATUS_CONFIG: Record<EvalStatus, {
   icon: React.ReactNode;
   variant: "outline" | "default" | "destructive";
 }> = {
-  IDLE: {
-    label: "Evaluate",
-    icon: <Target className="h-3 w-3" />,
-    variant: "outline",
-  },
-  EVALUATING: {
-    label: "Evaluating…",
-    icon: <Loader2 className="h-3 w-3 animate-spin" />,
-    variant: "default",
-  },
-  READY: {
-    label: "Re-Evaluate",
-    icon: <CheckCircle2 className="h-3 w-3" />,
-    variant: "outline",
-  },
-  PAUSED: {
-    label: "Paused",
-    icon: <AlertTriangle className="h-3 w-3" />,
-    variant: "outline",
-  },
-  ERROR: {
-    label: "Retry Evaluate",
-    icon: <RotateCcw className="h-3 w-3" />,
-    variant: "destructive",
-  },
+  IDLE: { label: "Evaluate", icon: <Target className="h-3 w-3" />, variant: "outline" },
+  EVALUATING: { label: "Evaluating…", icon: <Loader2 className="h-3 w-3 animate-spin" />, variant: "default" },
+  READY: { label: "Re-Evaluate", icon: <CheckCircle2 className="h-3 w-3" />, variant: "outline" },
+  PAUSED: { label: "Paused", icon: <AlertTriangle className="h-3 w-3" />, variant: "outline" },
+  ERROR: { label: "Retry Evaluate", icon: <RotateCcw className="h-3 w-3" />, variant: "destructive" },
 };
 
 export default function EvaluateButton({ selectedAsset }: EvaluateButtonProps) {
-  const evaluate = useEvaluate();
-  const { state, start, complete, error } = useEvaluationProgress();
+  const { run, canRun, state } = useRunEvaluation(selectedAsset);
   const config = STATUS_CONFIG[state.status];
-
-  const handleClick = useCallback(async () => {
-    if (!selectedAsset) return;
-    if (state.status === "EVALUATING") return;
-
-    start();
-    try {
-      await evaluate.mutateAsync({ asset: selectedAsset });
-      complete();
-    } catch (err) {
-      error((err as Error).message);
-    }
-  }, [selectedAsset, state.status, start, evaluate, complete, error]);
-
   const isEvaluating = state.status === "EVALUATING";
 
   return (
@@ -79,10 +43,9 @@ export default function EvaluateButton({ selectedAsset }: EvaluateButtonProps) {
             variant={config.variant}
             size="sm"
             className="h-8 text-xs font-mono gap-1.5 overflow-hidden relative"
-            onClick={handleClick}
-            disabled={!selectedAsset || isEvaluating}
+            onClick={run}
+            disabled={!canRun}
           >
-            {/* Background fill progress */}
             {isEvaluating && (
               <div
                 className="absolute inset-0 bg-primary/20 transition-all duration-300 ease-out"
@@ -94,7 +57,6 @@ export default function EvaluateButton({ selectedAsset }: EvaluateButtonProps) {
               {config.label}
             </span>
           </Button>
-          {/* Bottom progress bar */}
           {isEvaluating && (
             <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-secondary rounded-b-md overflow-hidden">
               <div
@@ -108,7 +70,6 @@ export default function EvaluateButton({ selectedAsset }: EvaluateButtonProps) {
 
       <HoverCardContent className="w-80 p-0" side="bottom" align="end">
         <div className="p-3 space-y-3">
-          {/* Title */}
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-foreground">
               Evaluation Progress
@@ -121,7 +82,6 @@ export default function EvaluateButton({ selectedAsset }: EvaluateButtonProps) {
             </Badge>
           </div>
 
-          {/* Phase + detail */}
           {state.status !== "IDLE" && (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[10px] font-mono">
@@ -133,7 +93,6 @@ export default function EvaluateButton({ selectedAsset }: EvaluateButtonProps) {
             </div>
           )}
 
-          {/* ETA */}
           {state.status === "EVALUATING" && (
             <div className="flex items-center justify-between text-[10px] font-mono">
               <span className="text-muted-foreground">ETA</span>
@@ -147,7 +106,6 @@ export default function EvaluateButton({ selectedAsset }: EvaluateButtonProps) {
             </p>
           )}
 
-          {/* Checklist */}
           {state.status !== "IDLE" && (
             <div className="space-y-1 border-t border-border pt-2">
               <span className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Gating Checklist</span>
@@ -171,7 +129,6 @@ export default function EvaluateButton({ selectedAsset }: EvaluateButtonProps) {
             </div>
           )}
 
-          {/* Blockers */}
           {state.blockers.length > 0 && (
             <div className="space-y-1 border-t border-border pt-2">
               <span className="text-[9px] font-mono uppercase tracking-wider text-bearish">Blockers</span>

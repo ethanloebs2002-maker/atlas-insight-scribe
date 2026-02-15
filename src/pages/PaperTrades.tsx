@@ -17,6 +17,7 @@ import SystemStatusBanner from "@/components/SystemStatusBanner";
 import PatternTierPanel from "@/components/PatternTierPanel";
 import AnomalyPanel from "@/components/AnomalyPanel";
 import EvaluateButton from "@/components/EvaluateButton";
+import RunAnalysisEmptyState from "@/components/RunAnalysisEmptyState";
 
 const ASSETS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
 
@@ -134,45 +135,47 @@ export default function PaperTrades() {
 
         {/* ─── DECISIONS STREAM ────────────────────────────── */}
         <TabsContent value="decisions">
-          <Card>
-            <CardHeader className="py-3 px-4">
-              <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Recent Decisions</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-[10px] font-mono">TIME</TableHead>
-                    <TableHead className="text-[10px] font-mono">ASSET</TableHead>
-                    <TableHead className="text-[10px] font-mono">PRED</TableHead>
-                    <TableHead className="text-[10px] font-mono">PROB</TableHead>
-                    <TableHead className="text-[10px] font-mono">REF PRICE</TableHead>
-                    <TableHead className="text-[10px] font-mono">HORIZON</TableHead>
-                    <TableHead className="text-[10px] font-mono">AGREEMENT</TableHead>
-                    <TableHead className="text-[10px] font-mono">REALIZED</TableHead>
-                    <TableHead className="text-[10px] font-mono">CORRECT</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {decisions.length === 0 ? (
-                    <TableRow><TableCell colSpan={9} className="text-center text-xs text-muted-foreground py-8 font-mono">No decisions recorded yet. Run an analysis to generate decisions.</TableCell></TableRow>
-                  ) : decisions.slice(0, 50).map((d: any) => (
-                    <TableRow key={d.id}>
-                      <TableCell className="text-[10px] font-mono text-muted-foreground">{new Date(d.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</TableCell>
-                      <TableCell className="text-[10px] font-mono font-bold">{d.asset_id}</TableCell>
-                      <TableCell><DirBadge dir={d.direction_pred} /></TableCell>
-                      <TableCell className="text-[10px] font-mono">{(d.probability_pred * 100).toFixed(0)}%</TableCell>
-                      <TableCell className="text-[10px] font-mono">${Number(d.ref_price).toLocaleString()}</TableCell>
-                      <TableCell><Badge variant="secondary" className="text-[9px] font-mono">{d.horizon}</Badge></TableCell>
-                      <TableCell className="text-[10px] font-mono">{(d.agreement_score * 100).toFixed(0)}%</TableCell>
-                      <TableCell>{d.realized_dir ? <DirBadge dir={d.realized_dir} /> : <span className="text-[10px] text-muted-foreground font-mono">pending</span>}</TableCell>
-                      <TableCell>{d.evaluated_at ? (d.correct ? <CheckCircle2 className="h-3.5 w-3.5 text-bullish" /> : <XCircle className="h-3.5 w-3.5 text-bearish" />) : <Minus className="h-3.5 w-3.5 text-muted-foreground" />}</TableCell>
+          {decisions.length === 0 ? (
+            <RunAnalysisEmptyState selectedAsset={selectedAsset} timeframe="4h" />
+          ) : (
+            <Card>
+              <CardHeader className="py-3 px-4">
+                <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Recent Decisions</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[10px] font-mono">TIME</TableHead>
+                      <TableHead className="text-[10px] font-mono">ASSET</TableHead>
+                      <TableHead className="text-[10px] font-mono">PRED</TableHead>
+                      <TableHead className="text-[10px] font-mono">PROB</TableHead>
+                      <TableHead className="text-[10px] font-mono">REF PRICE</TableHead>
+                      <TableHead className="text-[10px] font-mono">HORIZON</TableHead>
+                      <TableHead className="text-[10px] font-mono">AGREEMENT</TableHead>
+                      <TableHead className="text-[10px] font-mono">REALIZED</TableHead>
+                      <TableHead className="text-[10px] font-mono">CORRECT</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {decisions.slice(0, 50).map((d: any) => (
+                      <TableRow key={d.id}>
+                        <TableCell className="text-[10px] font-mono text-muted-foreground">{new Date(d.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</TableCell>
+                        <TableCell className="text-[10px] font-mono font-bold">{d.asset_id}</TableCell>
+                        <TableCell><DirBadge dir={d.direction_pred} /></TableCell>
+                        <TableCell className="text-[10px] font-mono">{(d.probability_pred * 100).toFixed(0)}%</TableCell>
+                        <TableCell className="text-[10px] font-mono">${Number(d.ref_price).toLocaleString()}</TableCell>
+                        <TableCell><Badge variant="secondary" className="text-[9px] font-mono">{d.horizon}</Badge></TableCell>
+                        <TableCell className="text-[10px] font-mono">{(d.agreement_score * 100).toFixed(0)}%</TableCell>
+                        <TableCell>{d.realized_dir ? <DirBadge dir={d.realized_dir} /> : <span className="text-[10px] text-muted-foreground font-mono">pending</span>}</TableCell>
+                        <TableCell>{d.evaluated_at ? (d.correct ? <CheckCircle2 className="h-3.5 w-3.5 text-bullish" /> : <XCircle className="h-3.5 w-3.5 text-bearish" />) : <Minus className="h-3.5 w-3.5 text-muted-foreground" />}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* ─── OPEN TRADES ─────────────────────────────────── */}
