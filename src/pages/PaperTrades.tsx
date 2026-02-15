@@ -43,6 +43,7 @@ export default function PaperTrades() {
   const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [debugProb, setDebugProb] = useState(false);
   const isMobile = useIsMobile();
 
   const sched = useAutoEvaluationScheduler(runAutoEvalTick, !paused && !!selectedAsset);
@@ -214,13 +215,17 @@ export default function PaperTrades() {
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 h-full min-w-0">
                 {/* Left: compact list */}
                 <div className="lg:col-span-5 min-w-0 flex flex-col">
-                  <div className="mb-2">
+                  <div className="mb-2 flex items-center gap-2">
                     <Input
                       placeholder="Search asset..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="h-7 text-[10px] font-mono"
+                      className="h-7 text-[10px] font-mono flex-1"
                     />
+                    <label className="flex items-center gap-1 shrink-0 cursor-pointer select-none">
+                      <Switch checked={debugProb} onCheckedChange={setDebugProb} className="h-4 w-8 [&>span]:h-3 [&>span]:w-3" />
+                      <span className="text-[9px] font-mono text-muted-foreground">Debug Prob</span>
+                    </label>
                   </div>
                   <ScrollArea className="flex-1 max-h-[calc(100vh-320px)]">
                     <div className="space-y-1 pr-2">
@@ -229,6 +234,7 @@ export default function PaperTrades() {
                           key={d.id}
                           d={d}
                           selected={isSelected(d.id)}
+                          debugProb={debugProb}
                           onClick={() => selectItem({
                             kind: "decision", id: d.id, asset_id: d.asset_id, timeframe: d.timeframe || "4h",
                             horizon: d.horizon, direction_pred: d.direction_pred, probability_pred: d.probability_pred,
@@ -540,7 +546,10 @@ export default function PaperTrades() {
 
 // ─── COMPACT LIST ROW COMPONENTS ────────────────────────────────
 
-function DecisionRow({ d, selected, onClick }: { d: any; selected: boolean; onClick: () => void }) {
+function DecisionRow({ d, selected, onClick, debugProb = false }: { d: any; selected: boolean; onClick: () => void; debugProb?: boolean }) {
+  const probValue = Number(d.probability_pred);
+  const probDisplay = Number.isFinite(probValue) ? (probValue * 100).toFixed(2) : "—";
+
   return (
     <button
       onClick={onClick}
@@ -552,7 +561,7 @@ function DecisionRow({ d, selected, onClick }: { d: any; selected: boolean; onCl
         <span className="text-[10px] font-mono font-bold shrink-0">{d.asset_id}</span>
         <DirBadge dir={d.direction_pred} />
         <span className="text-[10px] font-mono font-bold">
-          {Math.round(asProbability(d.probability_pred, "row") * 100)}%
+          {probDisplay}%
         </span>
         <div className="flex-1" />
         {d.correct != null && (
@@ -565,6 +574,16 @@ function DecisionRow({ d, selected, onClick }: { d: any; selected: boolean; onCl
       <div className="flex items-center gap-1.5 mt-1 flex-wrap">
         <Badge variant="secondary" className="text-[8px] font-mono py-0 h-4">{d.timeframe || "4h"}</Badge>
         <Badge variant="secondary" className="text-[8px] font-mono py-0 h-4">{d.horizon}</Badge>
+        {debugProb && (
+          <>
+            <Badge variant="outline" className="text-[8px] font-mono py-0 h-4 border-primary/30 text-primary">
+              RAW {d.probability_raw != null ? Number(d.probability_raw).toFixed(4) : "—"}
+            </Badge>
+            <Badge variant="outline" className="text-[8px] font-mono py-0 h-4 border-primary/30 text-primary">
+              SRC {d.probability_source || "—"}
+            </Badge>
+          </>
+        )}
         <span className="text-[9px] font-mono text-muted-foreground ml-auto truncate">
           {new Date(d.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </span>
