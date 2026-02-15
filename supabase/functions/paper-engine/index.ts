@@ -219,6 +219,28 @@ async function checkCadenceGuard(emittedBy: string): Promise<{ allowed: boolean;
   return { allowed: true };
 }
 
+// ─── STUCK PROBABILITY DETECTION ─────────────────────────────────
+async function checkStuckProbability(assetId: string, currentProb: number) {
+  try {
+    const { data: recent } = await supabase
+      .from("paper_decisions")
+      .select("probability_pred")
+      .eq("asset_id", assetId)
+      .order("ts", { ascending: false })
+      .limit(20);
+
+    if (!recent || recent.length < 10) return;
+
+    const sameCount = recent.filter(
+      (r: any) => Math.abs(Number(r.probability_pred) - currentProb) < 0.001
+    ).length;
+
+    if (sameCount > recent.length * 0.8) {
+      console.warn(`[STUCK_PROB] Probability appears stuck for ${assetId}: ${currentProb} (${sameCount}/${recent.length} identical)`);
+    }
+  } catch { /* non-critical */ }
+}
+
 // ─── EMIT DECISION (GUARANTEED) ──────────────────────────────────
 async function emitDecision(
   runId: string,
@@ -254,6 +276,8 @@ async function emitDecision(
       ref_price: context.currentPrice || 0,
       direction_pred: "NEUTRAL",
       probability_pred: 0.5,
+      probability_raw: 0.5,
+      probability_source: "paused_fallback",
       agreement_score: 0,
       consensus_score: 0,
       completeness_score: 0,
@@ -279,6 +303,8 @@ async function emitDecision(
       ref_price: context.currentPrice || 0,
       direction_pred: "NEUTRAL",
       probability_pred: 0.5,
+      probability_raw: 0.5,
+      probability_source: "error_fallback",
       agreement_score: 0,
       consensus_score: 0,
       completeness_score: 0,
@@ -307,8 +333,12 @@ async function emitDecision(
     if (best.type === "bullish") direction = "UP";
     else if (best.type === "bearish") direction = "DOWN";
 
-    const probability = best.probability || 0.5;
+    const rawProbability = best.probability;
+    const probability = (typeof rawProbability === "number" && Number.isFinite(rawProbability)) ? rawProbability : 0.5;
     const confidence = Math.round(probability * 100);
+
+    // Stuck probability detection
+    await checkStuckProbability(assetId, probability);
 
     if (confidence >= 40 && direction !== "NEUTRAL") {
       // TRADE_CANDIDATE
@@ -323,6 +353,8 @@ async function emitDecision(
         ref_price: context.currentPrice,
         direction_pred: direction,
         probability_pred: probability,
+        probability_raw: rawProbability,
+        probability_source: "indicator-engine",
         agreement_score: context.agreementScore,
         consensus_score: context.consensusScore,
         completeness_score: context.completenessScore,
@@ -396,6 +428,8 @@ async function emitDecision(
     ref_price: context.currentPrice || 0,
     direction_pred: "NEUTRAL",
     probability_pred: 0.3,
+    probability_raw: 0.3,
+    probability_source: "no_trade_fallback",
     agreement_score: context.agreementScore,
     consensus_score: context.consensusScore,
     completeness_score: context.completenessScore,

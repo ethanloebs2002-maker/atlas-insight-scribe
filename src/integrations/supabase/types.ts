@@ -1454,6 +1454,8 @@ export type Database = {
           horizon: string
           id: string
           probability_pred: number
+          probability_raw: number | null
+          probability_source: string | null
           realized_dir: string | null
           realized_move_pct: number | null
           ref_price: number
@@ -1476,6 +1478,8 @@ export type Database = {
           horizon?: string
           id?: string
           probability_pred: number
+          probability_raw?: number | null
+          probability_source?: string | null
           realized_dir?: string | null
           realized_move_pct?: number | null
           ref_price: number
@@ -1498,6 +1502,8 @@ export type Database = {
           horizon?: string
           id?: string
           probability_pred?: number
+          probability_raw?: number | null
+          probability_source?: string | null
           realized_dir?: string | null
           realized_move_pct?: number | null
           ref_price?: number
