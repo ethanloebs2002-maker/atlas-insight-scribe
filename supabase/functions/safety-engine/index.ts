@@ -11,17 +11,305 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// ─── THRESHOLDS ───────────────────────────────────────────────────
-const VOLATILITY_SPIKE_MULTIPLIER = 2.5; // ATR spike vs rolling avg
-const INTEGRITY_COLLAPSE_THRESHOLD = 0.3; // consensus below this
-const DATA_GAP_HOURS = 6; // no data for this long
-const CAUTION_ANOMALY_COUNT = 2;
-const ESCALATED_ANOMALY_COUNT = 4;
+// ─── THRESHOLDS ────────────────────────────────────────────────
+const WARN_TH = 45;
+const HALT_TH = 70;
+const K_WARN = 2;
+const K_HALT = 1;
+const K_CLEAR = 3;
+const EMA_ALPHA = 0.35;
+const N_COOLDOWN_RT = 10; // RT intervals
+const VOLATILITY_SPIKE_MULTIPLIER = 2.5;
+const INTEGRITY_COLLAPSE_THRESHOLD = 0.3;
+const DATA_GAP_HOURS = 6;
 const PATTERN_VALIDATION_PASSES_FOR_VALIDATED = 3;
 const PATTERN_VALIDATION_PASSES_FOR_PROMOTED = 5;
 const PATTERN_FAILURE_THRESHOLD = 3;
 
-// ─── GET SYSTEM STATUS ───────────────────────────────────────────
+// ─── ROOT CAUSE TYPES ──────────────────────────────────────────
+type RootCause = "price_shock" | "vol_spike" | "liquidity_collapse" | "source_divergence" | "derivatives_stress";
+
+// ─── LOOP A: REAL-TIME SENSING ─────────────────────────────────
+async function rtSense(assetId: string): Promise<{
+  score: number;
+  proposedState: string;
+  rootCauses: Array<{ cause: RootCause; contribution: number }>;
+  metrics: Record<string, number>;
+}> {
+  const metrics: Record<string, number> = {};
+  const causeScores: Record<RootCause, number> = {
+    price_shock: 0,
+    vol_spike: 0,
+    liquidity_collapse: 0,
+    source_divergence: 0,
+    derivatives_stress: 0,
+  };
+
+  // 1) Volatility spike via ATR
+  const { data: fingerprints } = await supabase
+    .from("asset_fingerprints")
+    .select("atr_normalized, volatility_rank, regime_label")
+    .eq("asset_id", assetId)
+    .order("computed_at", { ascending: false })
+    .limit(10);
+
+  if (fingerprints && fingerprints.length >= 2) {
+    const latest = Number(fingerprints[0].atr_normalized);
+    const avg = fingerprints.slice(1).reduce((s, f) => s + Number(f.atr_normalized), 0) / (fingerprints.length - 1);
+    const ratio = avg > 0 ? latest / avg : 0;
+    metrics.atr_ratio = ratio;
+    metrics.volatility_rank = Number(fingerprints[0].volatility_rank);
+
+    if (ratio > VOLATILITY_SPIKE_MULTIPLIER) {
+      causeScores.vol_spike = Math.min(40, (ratio - VOLATILITY_SPIKE_MULTIPLIER) * 15);
+    }
+    if (ratio > 4) {
+      causeScores.price_shock = Math.min(30, (ratio - 4) * 10);
+    }
+  }
+
+  // 2) Integrity collapse via recent decisions
+  const { data: decisions } = await supabase
+    .from("paper_decisions")
+    .select("consensus_score, agreement_score, completeness_score")
+    .eq("asset_id", assetId)
+    .order("ts", { ascending: false })
+    .limit(5);
+
+  if (decisions && decisions.length >= 3) {
+    const avgConsensus = decisions.reduce((s, d) => s + Number(d.consensus_score), 0) / decisions.length;
+    const avgAgreement = decisions.reduce((s, d) => s + Number(d.agreement_score), 0) / decisions.length;
+    metrics.avg_consensus = avgConsensus;
+    metrics.avg_agreement = avgAgreement;
+
+    if (avgConsensus < INTEGRITY_COLLAPSE_THRESHOLD) {
+      causeScores.source_divergence = Math.min(35, (INTEGRITY_COLLAPSE_THRESHOLD - avgConsensus) * 100);
+    }
+  }
+
+  // 3) Data gap
+  const { data: lastDecision } = await supabase
+    .from("paper_decisions")
+    .select("ts")
+    .eq("asset_id", assetId)
+    .order("ts", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lastDecision) {
+    const hoursSince = (Date.now() - new Date(lastDecision.ts).getTime()) / (1000 * 60 * 60);
+    metrics.hours_since_decision = hoursSince;
+    if (hoursSince > DATA_GAP_HOURS) {
+      causeScores.liquidity_collapse = Math.min(25, (hoursSince - DATA_GAP_HOURS) * 3);
+    }
+  }
+
+  // 4) Anomaly events active count
+  const { count } = await supabase
+    .from("anomaly_events")
+    .select("id", { count: "exact", head: true })
+    .eq("asset_id", assetId)
+    .eq("resolved", false);
+  metrics.active_anomalies = count || 0;
+  if ((count || 0) >= 3) {
+    causeScores.derivatives_stress = Math.min(20, (count || 0) * 5);
+  }
+
+  // Aggregate score (0–100)
+  const rawScore = Object.values(causeScores).reduce((a, b) => a + b, 0);
+  const score = Math.min(100, Math.max(0, rawScore));
+
+  // Proposed state
+  let proposedState = "NORMAL";
+  if (score >= HALT_TH) proposedState = "HALT";
+  else if (score >= WARN_TH) proposedState = "WARN";
+
+  // Top 3 root causes
+  const rootCauses = (Object.entries(causeScores) as Array<[RootCause, number]>)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([cause, contribution]) => ({ cause, contribution }));
+
+  // Store RT sample
+  await supabase.from("anomaly_rt_samples").insert({
+    asset_id: assetId,
+    anomaly_score: score,
+    proposed_state: proposedState,
+    root_causes_json: rootCauses,
+    metrics_json: metrics,
+  });
+
+  return { score, proposedState, rootCauses, metrics };
+}
+
+// ─── STATE STABILIZATION (K-BAR SMOOTHING) ─────────────────────
+async function stabilize(assetId: string, rtResult: {
+  score: number;
+  proposedState: string;
+  rootCauses: Array<{ cause: string; contribution: number }>;
+}): Promise<{
+  stableState: string;
+  stableScore: number;
+  transitioned: boolean;
+  previousState: string;
+  cooldownActive: boolean;
+}> {
+  // Get or create stable state
+  let { data: state } = await supabase
+    .from("anomaly_stable_state")
+    .select("*")
+    .eq("asset_id", assetId)
+    .maybeSingle();
+
+  if (!state) {
+    const { data: newState } = await supabase
+      .from("anomaly_stable_state")
+      .insert({ asset_id: assetId })
+      .select()
+      .single();
+    state = newState;
+  }
+
+  if (!state) throw new Error("Failed to get/create stable state");
+
+  const previousState = state.stable_state;
+  const prevScore = Number(state.stable_score);
+
+  // EMA smoothed score
+  const stableScore = EMA_ALPHA * rtResult.score + (1 - EMA_ALPHA) * prevScore;
+
+  // Update consecutive counters
+  let cWarn = rtResult.proposedState === "WARN" || rtResult.proposedState === "HALT" ? state.consecutive_warn + 1 : 0;
+  let cHalt = rtResult.proposedState === "HALT" ? state.consecutive_halt + 1 : 0;
+  let cNormal = rtResult.proposedState === "NORMAL" ? state.consecutive_normal + 1 : 0;
+
+  // Reset non-matching counters
+  if (rtResult.proposedState === "NORMAL") { cWarn = 0; cHalt = 0; }
+  if (rtResult.proposedState === "WARN") { cHalt = 0; cNormal = 0; }
+  if (rtResult.proposedState === "HALT") { cNormal = 0; }
+
+  // Check cooldown
+  const now = new Date();
+  const cooldownActive = state.cooldown_until && new Date(state.cooldown_until) > now;
+
+  // Determine stable state with K-bar logic
+  let newStableState = previousState;
+
+  if (cooldownActive) {
+    // During cooldown, treat as WARN
+    newStableState = "WARN";
+  } else {
+    // Promotion logic
+    if (previousState === "NORMAL" && cWarn >= K_WARN) {
+      newStableState = "WARN";
+    }
+    if ((previousState === "NORMAL" || previousState === "WARN") && cHalt >= K_HALT) {
+      newStableState = "HALT";
+    }
+
+    // Clearing logic
+    if (previousState === "HALT" && cNormal >= K_CLEAR) {
+      // Enter cooldown after HALT clears
+      newStableState = "WARN";
+      const cooldownEnd = new Date(now.getTime() + N_COOLDOWN_RT * 60 * 1000); // assuming 1min RT
+      await supabase.from("anomaly_stable_state").update({
+        cooldown_until: cooldownEnd.toISOString(),
+        cooldown_reason: "HALT_CLEAR",
+      }).eq("asset_id", assetId);
+    }
+    if (previousState === "WARN" && cNormal >= K_CLEAR) {
+      newStableState = "NORMAL";
+    }
+  }
+
+  const transitioned = newStableState !== previousState;
+
+  // Compute policy adjustments
+  const policyAdjustments: Record<string, unknown> = {};
+  if (newStableState === "WARN") {
+    policyAdjustments.agreement_min_delta = 5;
+    policyAdjustments.consensus_min_delta = 5;
+    policyAdjustments.completeness_min_delta = 5;
+    policyAdjustments.learning_rate_multiplier = 0.5;
+    policyAdjustments.max_boost_reduction = 1;
+  } else if (newStableState === "HALT") {
+    policyAdjustments.new_trades_paused = true;
+    policyAdjustments.learning_frozen = true;
+  }
+
+  // Update stable state
+  await supabase.from("anomaly_stable_state").update({
+    stable_state: newStableState,
+    stable_score: stableScore,
+    consecutive_warn: cWarn,
+    consecutive_halt: cHalt,
+    consecutive_normal: cNormal,
+    root_causes_json: rtResult.rootCauses,
+    policy_adjustments_json: policyAdjustments,
+    last_transition_at: transitioned ? now.toISOString() : state.last_transition_at,
+    updated_at: now.toISOString(),
+  }).eq("asset_id", assetId);
+
+  // If HALT, apply instant system_status update
+  if (newStableState === "HALT") {
+    await supabase.from("system_status").upsert({
+      asset_id: assetId,
+      output_mode: "ESCALATED",
+      anomaly_halt: true,
+      learning_frozen: true,
+      last_anomaly_check: now.toISOString(),
+      reason: "HALT: " + rtResult.rootCauses.map(r => r.cause).join(", "),
+      updated_at: now.toISOString(),
+    }, { onConflict: "asset_id" });
+  } else if (newStableState === "WARN") {
+    await supabase.from("system_status").upsert({
+      asset_id: assetId,
+      output_mode: "CAUTION",
+      anomaly_halt: false,
+      learning_frozen: false,
+      last_anomaly_check: now.toISOString(),
+      reason: "WARN: " + rtResult.rootCauses.map(r => r.cause).join(", "),
+      updated_at: now.toISOString(),
+    }, { onConflict: "asset_id" });
+  } else {
+    await supabase.from("system_status").upsert({
+      asset_id: assetId,
+      output_mode: "NORMAL",
+      anomaly_halt: false,
+      learning_frozen: false,
+      last_anomaly_check: now.toISOString(),
+      reason: null,
+      updated_at: now.toISOString(),
+    }, { onConflict: "asset_id" });
+  }
+
+  return { stableState: newStableState, stableScore, transitioned, previousState, cooldownActive: !!cooldownActive };
+}
+
+// ─── FULL RT CYCLE ──────────────────────────────────────────────
+async function runRTCycle(assetId: string) {
+  const rtResult = await rtSense(assetId);
+  const stabilized = await stabilize(assetId, rtResult);
+
+  // Log anomaly events for new detections
+  if (stabilized.transitioned && stabilized.stableState !== "NORMAL") {
+    await supabase.from("anomaly_events").insert({
+      asset_id: assetId,
+      event_type: `STATE_${stabilized.stableState}`,
+      severity: stabilized.stableState === "HALT" ? "critical" : "warn",
+      description: `State transition: ${stabilized.previousState} → ${stabilized.stableState} (score: ${rtResult.score.toFixed(1)})`,
+      metrics_json: { ...rtResult.metrics, root_causes: rtResult.rootCauses },
+    });
+  }
+
+  return {
+    rt: rtResult,
+    stable: stabilized,
+  };
+}
+
+// ─── GET STABLE STATUS (enhanced) ──────────────────────────────
 async function getStatus(asset_id = "GLOBAL") {
   const { data: status } = await supabase
     .from("system_status")
@@ -33,6 +321,10 @@ async function getStatus(asset_id = "GLOBAL") {
     ? await supabase.from("system_status").select("*").eq("asset_id", "GLOBAL").maybeSingle()
     : { data: null };
 
+  const { data: stableState } = asset_id !== "GLOBAL"
+    ? await supabase.from("anomaly_stable_state").select("*").eq("asset_id", asset_id).maybeSingle()
+    : { data: null };
+
   const { data: recentAnomalies } = await supabase
     .from("anomaly_events")
     .select("*")
@@ -41,11 +333,17 @@ async function getStatus(asset_id = "GLOBAL") {
     .order("created_at", { ascending: false })
     .limit(20);
 
-  // Effective mode: take the worse of global and asset-specific
+  // Effective mode
   const modes = ["NORMAL", "CAUTION", "ESCALATED"];
   const assetMode = status?.output_mode || "NORMAL";
   const globalMode = globalStatus?.output_mode || "NORMAL";
   const effectiveMode = modes[Math.max(modes.indexOf(assetMode), modes.indexOf(globalMode))];
+
+  // Map stable state to display state
+  let displayState = stableState?.stable_state || "NORMAL";
+  const cooldownUntil = stableState?.cooldown_until;
+  const cooldownActive = cooldownUntil && new Date(cooldownUntil) > new Date();
+  if (cooldownActive) displayState = "COOLDOWN";
 
   return {
     status: status || { asset_id, output_mode: "NORMAL", anomaly_halt: false, learning_frozen: false },
@@ -53,158 +351,51 @@ async function getStatus(asset_id = "GLOBAL") {
     effectiveMode,
     activeAnomalies: recentAnomalies || [],
     learningFrozen: status?.learning_frozen || globalStatus?.learning_frozen || false,
+    // v1.6.1a additions
+    stableState: stableState || null,
+    displayState,
+    stableScore: stableState ? Number(stableState.stable_score) : 0,
+    rootCauses: stableState?.root_causes_json || [],
+    policyAdjustments: stableState?.policy_adjustments_json || {},
+    cooldownActive: !!cooldownActive,
+    cooldownUntil: cooldownUntil || null,
   };
 }
 
-// ─── CHECK ANOMALIES ─────────────────────────────────────────────
+// ─── GET RT TIMELINE ────────────────────────────────────────────
+async function getRTTimeline(assetId: string, limit = 30) {
+  const { data, error } = await supabase
+    .from("anomaly_rt_samples")
+    .select("*")
+    .eq("asset_id", assetId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+// ─── LEGACY: CHECK ANOMALIES ────────────────────────────────────
 async function checkAnomalies(assets: string[]) {
-  const results: Array<{ asset_id: string; events: any[] }> = [];
-
-  for (const asset_id of assets) {
-    const events: any[] = [];
-
-    // 1) Volatility spike: compare recent ATR to rolling average
-    const { data: fingerprints } = await supabase
-      .from("asset_fingerprints")
-      .select("atr_normalized, volatility_rank, regime_label, computed_at")
-      .eq("asset_id", asset_id)
-      .order("computed_at", { ascending: false })
-      .limit(10);
-
-    if (fingerprints && fingerprints.length >= 2) {
-      const latest = Number(fingerprints[0].atr_normalized);
-      const avgATR = fingerprints.slice(1).reduce((s, f) => s + Number(f.atr_normalized), 0)
-        / (fingerprints.length - 1);
-
-      if (avgATR > 0 && latest / avgATR > VOLATILITY_SPIKE_MULTIPLIER) {
-        events.push({
-          event_type: "VOLATILITY_SPIKE",
-          severity: latest / avgATR > 4 ? "critical" : "warn",
-          description: `ATR spike: ${latest.toFixed(4)} vs avg ${avgATR.toFixed(4)} (${(latest / avgATR).toFixed(1)}x)`,
-          metrics_json: { current_atr: latest, avg_atr: avgATR, ratio: latest / avgATR },
-        });
-      }
-
-      // 2) Regime break: check if regime changed from previous
-      if (fingerprints.length >= 2 && fingerprints[0].regime_label !== fingerprints[1].regime_label) {
-        events.push({
-          event_type: "REGIME_BREAK",
-          severity: "warn",
-          description: `Regime changed: ${fingerprints[1].regime_label} → ${fingerprints[0].regime_label}`,
-          metrics_json: { from: fingerprints[1].regime_label, to: fingerprints[0].regime_label },
-        });
-      }
-    }
-
-    // 3) Data gap: check last decision timestamp
-    const { data: lastDecision } = await supabase
-      .from("paper_decisions")
-      .select("ts")
-      .eq("asset_id", asset_id)
-      .order("ts", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (lastDecision) {
-      const hoursSince = (Date.now() - new Date(lastDecision.ts).getTime()) / (1000 * 60 * 60);
-      if (hoursSince > DATA_GAP_HOURS) {
-        events.push({
-          event_type: "DATA_GAP",
-          severity: hoursSince > 24 ? "critical" : "warn",
-          description: `No decisions for ${hoursSince.toFixed(1)}h (threshold: ${DATA_GAP_HOURS}h)`,
-          metrics_json: { hours_since: hoursSince },
-        });
-      }
-    }
-
-    // 4) Integrity collapse: check recent decisions' consensus
-    const { data: recentDecisions } = await supabase
-      .from("paper_decisions")
-      .select("consensus_score, agreement_score")
-      .eq("asset_id", asset_id)
-      .order("ts", { ascending: false })
-      .limit(5);
-
-    if (recentDecisions && recentDecisions.length >= 3) {
-      const avgConsensus = recentDecisions.reduce((s, d) => s + Number(d.consensus_score), 0)
-        / recentDecisions.length;
-      if (avgConsensus < INTEGRITY_COLLAPSE_THRESHOLD) {
-        events.push({
-          event_type: "INTEGRITY_COLLAPSE",
-          severity: "critical",
-          description: `Avg consensus ${(avgConsensus * 100).toFixed(0)}% across last ${recentDecisions.length} decisions`,
-          metrics_json: { avg_consensus: avgConsensus, sample: recentDecisions.length },
-        });
-      }
-    }
-
-    // Store events and update status
-    if (events.length > 0) {
-      for (const evt of events) {
-        await supabase.from("anomaly_events").insert({ ...evt, asset_id });
-      }
-    }
-
-    // Count active (unresolved) anomalies
-    const { count } = await supabase
-      .from("anomaly_events")
-      .select("id", { count: "exact", head: true })
-      .eq("asset_id", asset_id)
-      .eq("resolved", false);
-
-    const activeCount = count || 0;
-
-    // Determine output mode
-    let newMode = "NORMAL";
-    let halt = false;
-    let frozen = false;
-
-    if (activeCount >= ESCALATED_ANOMALY_COUNT) {
-      newMode = "ESCALATED";
-      frozen = true;
-    } else if (activeCount >= CAUTION_ANOMALY_COUNT) {
-      newMode = "CAUTION";
-    }
-
-    // Check for critical events → auto-halt
-    const hasCritical = events.some(e => e.severity === "critical");
-    if (hasCritical) {
-      halt = true;
-      frozen = true;
-      newMode = "ESCALATED";
-    }
-
-    await supabase.from("system_status").upsert({
-      asset_id,
-      output_mode: newMode,
-      anomaly_halt: halt,
-      learning_frozen: frozen,
-      last_anomaly_check: new Date().toISOString(),
-      escalation_count: activeCount,
-      reason: events.length > 0 ? events.map(e => e.event_type).join(", ") : null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "asset_id" });
-
-    results.push({ asset_id, events });
+  const results = [];
+  for (const asset of assets) {
+    const cycleResult = await runRTCycle(asset);
+    results.push({ asset_id: asset, ...cycleResult });
   }
-
   return results;
 }
 
-// ─── RESOLVE ANOMALY ─────────────────────────────────────────────
+// ─── RESOLVE ANOMALY ────────────────────────────────────────────
 async function resolveAnomaly(anomalyId: string) {
   const { error } = await supabase.from("anomaly_events").update({
     resolved: true,
     resolved_at: new Date().toISOString(),
   }).eq("id", anomalyId);
-
   if (error) throw error;
   return { resolved: true };
 }
 
-// ─── PROMOTE PATTERNS ────────────────────────────────────────────
+// ─── PROMOTE PATTERNS ───────────────────────────────────────────
 async function promotePatterns(asset_id: string, timeframe = "4h") {
-  // Get all active patterns for this asset
   const { data: patterns } = await supabase
     .from("indicator_patterns")
     .select("id, asset_id, timeframe, regime_label, diracc_uplift, ev_uplift, stability_score, confidence_tier, is_active, support_n_decisions")
@@ -217,7 +408,6 @@ async function promotePatterns(asset_id: string, timeframe = "4h") {
   let promoted = 0, validated = 0, expired = 0;
 
   for (const pattern of patterns) {
-    // Get or create tier record
     let { data: tier } = await supabase
       .from("pattern_tiers")
       .select("*")
@@ -236,52 +426,27 @@ async function promotePatterns(asset_id: string, timeframe = "4h") {
 
     if (!tier) continue;
 
-    // Validate: check if pattern still performs well
     const stillValid = pattern.stability_score >= 0.7 && pattern.diracc_uplift > 0.03;
 
     if (stillValid) {
       const newPasses = tier.validation_passes + 1;
-
       if (newPasses >= PATTERN_VALIDATION_PASSES_FOR_PROMOTED && tier.tier !== "promoted") {
-        await supabase.from("pattern_tiers").update({
-          tier: "promoted",
-          promoted_at: new Date().toISOString(),
-          validation_passes: newPasses,
-          last_check_ts: new Date().toISOString(),
-        }).eq("id", tier.id);
+        await supabase.from("pattern_tiers").update({ tier: "promoted", promoted_at: new Date().toISOString(), validation_passes: newPasses, last_check_ts: new Date().toISOString() }).eq("id", tier.id);
         promoted++;
       } else if (newPasses >= PATTERN_VALIDATION_PASSES_FOR_VALIDATED && tier.tier === "candidate") {
-        await supabase.from("pattern_tiers").update({
-          tier: "validated",
-          validated_at: new Date().toISOString(),
-          validation_passes: newPasses,
-          last_check_ts: new Date().toISOString(),
-        }).eq("id", tier.id);
+        await supabase.from("pattern_tiers").update({ tier: "validated", validated_at: new Date().toISOString(), validation_passes: newPasses, last_check_ts: new Date().toISOString() }).eq("id", tier.id);
         validated++;
       } else {
-        await supabase.from("pattern_tiers").update({
-          validation_passes: newPasses,
-          last_check_ts: new Date().toISOString(),
-        }).eq("id", tier.id);
+        await supabase.from("pattern_tiers").update({ validation_passes: newPasses, last_check_ts: new Date().toISOString() }).eq("id", tier.id);
       }
     } else {
       const newFailures = tier.validation_failures + 1;
       if (newFailures >= PATTERN_FAILURE_THRESHOLD) {
-        await supabase.from("pattern_tiers").update({
-          tier: "expired",
-          expired_at: new Date().toISOString(),
-          validation_failures: newFailures,
-          last_check_ts: new Date().toISOString(),
-        }).eq("id", tier.id);
-
-        // Also deactivate the pattern
+        await supabase.from("pattern_tiers").update({ tier: "expired", expired_at: new Date().toISOString(), validation_failures: newFailures, last_check_ts: new Date().toISOString() }).eq("id", tier.id);
         await supabase.from("indicator_patterns").update({ is_active: false }).eq("id", pattern.id);
         expired++;
       } else {
-        await supabase.from("pattern_tiers").update({
-          validation_failures: newFailures,
-          last_check_ts: new Date().toISOString(),
-        }).eq("id", tier.id);
+        await supabase.from("pattern_tiers").update({ validation_failures: newFailures, last_check_ts: new Date().toISOString() }).eq("id", tier.id);
       }
     }
   }
@@ -289,35 +454,25 @@ async function promotePatterns(asset_id: string, timeframe = "4h") {
   return { promoted, validated, expired };
 }
 
-// ─── FETCH PATTERN TIERS ─────────────────────────────────────────
+// ─── FETCH PATTERN TIERS ────────────────────────────────────────
 async function fetchPatternTiers(asset_id?: string) {
-  let query = supabase
-    .from("pattern_tiers")
-    .select("*, indicator_patterns(*)")
-    .order("created_at", { ascending: false });
-
+  let query = supabase.from("pattern_tiers").select("*, indicator_patterns(*)").order("created_at", { ascending: false });
   if (asset_id) query = query.eq("asset_id", asset_id);
-
   const { data, error } = await query.limit(100);
   if (error) throw error;
   return data || [];
 }
 
-// ─── FETCH ANOMALY HISTORY ───────────────────────────────────────
+// ─── FETCH ANOMALY HISTORY ──────────────────────────────────────
 async function fetchAnomalyHistory(asset_id?: string, limit = 50) {
-  let query = supabase
-    .from("anomaly_events")
-    .select("*")
-    .order("created_at", { ascending: false });
-
+  let query = supabase.from("anomaly_events").select("*").order("created_at", { ascending: false });
   if (asset_id) query = query.eq("asset_id", asset_id);
-
   const { data, error } = await query.limit(limit);
   if (error) throw error;
   return data || [];
 }
 
-// ─── MAIN HANDLER ─────────────────────────────────────────────────
+// ─── MAIN HANDLER ───────────────────────────────────────────────
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -329,59 +484,61 @@ serve(async (req) => {
     const asset = url.searchParams.get("asset");
     const timeframe = url.searchParams.get("timeframe") || "4h";
 
-    if (action === "status") {
-      const result = await getStatus(asset || "GLOBAL");
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    let result: unknown;
+
+    switch (action) {
+      case "status":
+        result = await getStatus(asset || "GLOBAL");
+        break;
+
+      case "rt-sense":
+        if (!asset) throw new Error("asset required");
+        result = await runRTCycle(asset);
+        break;
+
+      case "rt-timeline":
+        if (!asset) throw new Error("asset required");
+        result = await getRTTimeline(asset, parseInt(url.searchParams.get("limit") || "30"));
+        break;
+
+      case "check-anomalies": {
+        const assets = asset ? [asset] : ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
+        result = await checkAnomalies(assets);
+        break;
+      }
+
+      case "resolve-anomaly": {
+        const anomalyId = url.searchParams.get("anomaly_id");
+        if (!anomalyId) throw new Error("anomaly_id required");
+        result = await resolveAnomaly(anomalyId);
+        break;
+      }
+
+      case "promote-patterns":
+        if (!asset) throw new Error("asset required");
+        result = await promotePatterns(asset, timeframe);
+        break;
+
+      case "pattern-tiers":
+        result = await fetchPatternTiers(asset || undefined);
+        break;
+
+      case "anomaly-history":
+        result = await fetchAnomalyHistory(asset || undefined);
+        break;
+
+      default:
+        throw new Error("Unknown action: " + action);
     }
 
-    if (action === "check-anomalies") {
-      const assets = asset ? [asset] : ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
-      const result = await checkAnomalies(assets);
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (action === "resolve-anomaly") {
-      const anomalyId = url.searchParams.get("anomaly_id");
-      if (!anomalyId) throw new Error("anomaly_id parameter required");
-      const result = await resolveAnomaly(anomalyId);
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (action === "promote-patterns") {
-      if (!asset) throw new Error("asset parameter required");
-      const result = await promotePatterns(asset, timeframe);
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (action === "pattern-tiers") {
-      const result = await fetchPatternTiers(asset || undefined);
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (action === "anomaly-history") {
-      const result = await fetchAnomalyHistory(asset || undefined);
-      return new Response(JSON.stringify({ data: result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    return new Response(JSON.stringify({ error: "Unknown action: " + action }), {
-      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return new Response(JSON.stringify({ data: result }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("Safety engine error:", err);
     return new Response(JSON.stringify({ error: (err as Error).message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
