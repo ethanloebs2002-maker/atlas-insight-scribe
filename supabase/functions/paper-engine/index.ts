@@ -133,9 +133,42 @@ async function recordDecision(body: any) {
   return data;
 }
 
+// ─── DEDUPE HELPER ────────────────────────────────────────────────
+function buildDuplicateKey(asset_id: string, direction: string, timeframe: string, horizon: string): string {
+  return `${asset_id}|${direction}|${timeframe}|${horizon}`;
+}
+
+async function cancelOlderDuplicates(duplicate_key: string, keepId?: string) {
+  let query = supabase
+    .from("paper_trades")
+    .select("id")
+    .eq("duplicate_key", duplicate_key)
+    .in("status", ["OPEN", "PENDING"])
+    .order("created_at", { ascending: false });
+
+  const { data: dupes } = await query;
+  if (!dupes || dupes.length === 0) return 0;
+
+  const idsToCancel = dupes.filter(d => d.id !== keepId).map(d => d.id);
+  if (idsToCancel.length === 0) return 0;
+
+  await supabase.from("paper_trades").update({
+    status: "CANCELED_DEDUPE",
+    ts_closed: new Date().toISOString(),
+    close_reason: "duplicate_key replaced by newer trade",
+  }).in("id", idsToCancel);
+
+  return idsToCancel.length;
+}
+
 // ─── RECORD TRADE ─────────────────────────────────────────────────
 async function recordTrade(body: any) {
   const { decision_id, asset_id, timeframe, regime_label, scenario_type, entry_zone_low, entry_zone_high, trigger_rule, stop_level, stop_rule, targets_json, time_window_end, evidence_snapshot_json } = body;
+
+  // Determine direction from scenario_type for dedupe key
+  const direction = scenario_type === "bullish" ? "UP" : scenario_type === "bearish" ? "DOWN" : "NEUTRAL";
+  const horizon = body.horizon || "24h";
+  const dupeKey = buildDuplicateKey(asset_id, direction, timeframe || "4h", horizon);
 
   const { data, error } = await supabase.from("paper_trades").insert({
     decision_id, asset_id, timeframe: timeframe || "4h",
@@ -143,9 +176,14 @@ async function recordTrade(body: any) {
     trigger_rule, stop_level, stop_rule, targets_json,
     time_window_end, evidence_snapshot_json,
     status: "PENDING",
+    duplicate_key: dupeKey,
   }).select().single();
 
   if (error) throw error;
+
+  // Cancel older duplicates (KEEP_NEWEST policy)
+  await cancelOlderDuplicates(dupeKey, data.id);
+
   return data;
 }
 
@@ -271,7 +309,11 @@ async function emitDecision(
 
       // Also create a paper trade
       if (entryZone && stopLoss && decision.data) {
-        await supabase.from("paper_trades").insert({
+        const tradeDirection = direction;
+        const tradeHorizon = horizon;
+        const tradeDupeKey = buildDuplicateKey(assetId, tradeDirection, timeframe, tradeHorizon);
+
+        const { data: tradeRow } = await supabase.from("paper_trades").insert({
           decision_id: decision.data.id,
           asset_id: assetId,
           timeframe,
@@ -285,7 +327,13 @@ async function emitDecision(
           targets_json: targets.map((t: any) => ({ price: t.price })),
           status: "PENDING",
           evidence_snapshot_json: { run_id: runId },
-        });
+          duplicate_key: tradeDupeKey,
+        }).select().single();
+
+        // Cancel older duplicates (KEEP_NEWEST)
+        if (tradeRow) {
+          await cancelOlderDuplicates(tradeDupeKey, tradeRow.id);
+        }
       }
 
       await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "TRADE_CANDIDATE decision written", { id: decision.data?.id, direction, confidence });

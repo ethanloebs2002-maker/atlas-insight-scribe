@@ -51,9 +51,24 @@ export default function PaperTrades() {
   const bhHorizonStats = stats?.bhHorizonStats || {};
   const config = stats?.config || { publicHorizons: ["6m", "1y", "3y", "5y"], learningHorizons: ["3m", "6m", "1y", "3y", "5y"], cadenceMap: {} };
 
-  const openTrades = trades.filter((t: any) => t.status === "OPEN");
-  const closedTrades = trades.filter((t: any) => t.status === "CLOSED");
-  const pendingTrades = trades.filter((t: any) => t.status === "PENDING");
+  // Deduplicate open trades: group by duplicate_key, keep newest per key
+  const deduplicatedActive = (() => {
+    const active = trades.filter((t: any) => t.status === "OPEN" || t.status === "PENDING");
+    const byKey = new Map<string, any>();
+    for (const t of active) {
+      const key = t.duplicate_key || t.id; // fallback to id if no key yet
+      const existing = byKey.get(key);
+      if (!existing || new Date(t.created_at) > new Date(existing.created_at)) {
+        byKey.set(key, t);
+      }
+    }
+    return Array.from(byKey.values());
+  })();
+
+  const openTrades = deduplicatedActive.filter((t: any) => t.status === "OPEN");
+  const pendingTrades = deduplicatedActive.filter((t: any) => t.status === "PENDING");
+  const TERMINAL_STATUSES = ["CLOSED", "CANCELED_DEDUPE", "CANCELED_LIMIT", "ERROR", "CLOSED_TIME", "CLOSED_TP", "CLOSED_SL"];
+  const closedTrades = trades.filter((t: any) => TERMINAL_STATUSES.includes(t.status));
   console.log("pending count", pendingTrades.length);
 
   const evaluatedDecisions = decisions.filter((d: any) => d.evaluated_at);
@@ -369,6 +384,7 @@ export default function PaperTrades() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="text-[10px] font-mono">STATUS</TableHead>
                     <TableHead className="text-[10px] font-mono">OUTCOME</TableHead>
                     <TableHead className="text-[10px] font-mono">ASSET</TableHead>
                     <TableHead className="text-[10px] font-mono">TYPE</TableHead>
@@ -376,8 +392,7 @@ export default function PaperTrades() {
                     <TableHead className="text-[10px] font-mono">EXIT</TableHead>
                     <TableHead className="text-[10px] font-mono">RETURN %</TableHead>
                     <TableHead className="text-[10px] font-mono">RETURN R</TableHead>
-                    <TableHead className="text-[10px] font-mono">MAE R</TableHead>
-                    <TableHead className="text-[10px] font-mono">MFE R</TableHead>
+                    <TableHead className="text-[10px] font-mono">REASON</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -385,6 +400,11 @@ export default function PaperTrades() {
                     <TableRow><TableCell colSpan={9} className="text-center text-xs text-muted-foreground py-8 font-mono">No closed trades yet.</TableCell></TableRow>
                   ) : closedTrades.map((t: any) => (
                     <TableRow key={t.id}>
+                      <TableCell>
+                        <Badge variant={t.status === "CANCELED_DEDUPE" ? "outline" : "secondary"} className={`text-[9px] font-mono ${t.status === "CANCELED_DEDUPE" ? "border-muted-foreground/40 text-muted-foreground" : ""}`}>
+                          {t.status}
+                        </Badge>
+                      </TableCell>
                       <TableCell><OutcomeBadge outcome={t.outcome_label} /></TableCell>
                       <TableCell className="text-[10px] font-mono font-bold">{t.asset_id}</TableCell>
                       <TableCell><ScenarioBadge type={t.scenario_type} /></TableCell>
@@ -392,8 +412,7 @@ export default function PaperTrades() {
                       <TableCell className="text-[10px] font-mono">{t.exit_price ? `$${Number(t.exit_price).toLocaleString()}` : "—"}</TableCell>
                       <TableCell className={`text-[10px] font-mono ${Number(t.return_pct) >= 0 ? "text-bullish" : "text-bearish"}`}>{t.return_pct !== null ? `${Number(t.return_pct).toFixed(2)}%` : "—"}</TableCell>
                       <TableCell className={`text-[10px] font-mono ${Number(t.return_r) >= 0 ? "text-bullish" : "text-bearish"}`}>{t.return_r !== null ? Number(t.return_r).toFixed(3) : "—"}</TableCell>
-                      <TableCell className="text-[10px] font-mono text-bearish">{t.mae_r !== null ? Number(t.mae_r).toFixed(3) : "—"}</TableCell>
-                      <TableCell className="text-[10px] font-mono text-bullish">{t.mfe_r !== null ? Number(t.mfe_r).toFixed(3) : "—"}</TableCell>
+                      <TableCell className="text-[10px] font-mono text-muted-foreground max-w-[200px] truncate">{t.close_reason || "—"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
