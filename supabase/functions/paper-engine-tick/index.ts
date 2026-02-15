@@ -748,6 +748,74 @@ class PaperEngineCore {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// HELPERS: Live candle fetch from CryptoCompare
+// ═══════════════════════════════════════════════════════════════════════════
+
+function tfToCC(tf: string): { endpoint: string; aggregate: number } {
+  switch (tf) {
+    case "1m":  return { endpoint: "histominute", aggregate: 1 };
+    case "5m":  return { endpoint: "histominute", aggregate: 5 };
+    case "15m": return { endpoint: "histominute", aggregate: 15 };
+    case "30m": return { endpoint: "histominute", aggregate: 30 };
+    case "1h":  return { endpoint: "histohour", aggregate: 1 };
+    case "4h":  return { endpoint: "histohour", aggregate: 4 };
+    case "1d":  return { endpoint: "histoday", aggregate: 1 };
+    default:    return { endpoint: "histohour", aggregate: 4 };
+  }
+}
+
+async function fetchLatestCandle(symbol: string, timeframe: string): Promise<Candle | null> {
+  const fsym = symbol.replace(/\/.*$/, "").toUpperCase(); // "BTC/USD" → "BTC"
+  const { endpoint, aggregate } = tfToCC(timeframe);
+  const url = `https://min-api.cryptocompare.com/data/v2/${endpoint}?fsym=${fsym}&tsym=USD&limit=2&aggregate=${aggregate}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json.Response !== "Success" || !json.Data?.Data?.length) return null;
+    // Use the last complete candle (second-to-last if current is still forming)
+    const candles = json.Data.Data;
+    const k = candles.length >= 2 ? candles[candles.length - 2] : candles[candles.length - 1];
+    return {
+      ts: new Date(k.time * 1000).toISOString(),
+      open: k.open,
+      high: k.high,
+      low: k.low,
+      close: k.close,
+      volume: k.volumefrom,
+    };
+  } catch (e) {
+    console.error(`fetchLatestCandle(${symbol}, ${timeframe}):`, e);
+    return null;
+  }
+}
+
+// Run one symbol/timeframe tick
+async function runSingleTick(
+  sb: ReturnType<typeof createClient>,
+  symbol: string,
+  timeframe: string,
+  candle: Candle,
+  policy: any,
+) {
+  const engine = new PaperEngineCore(sb, symbol, timeframe, candle, policy);
+  await engine.startTick();
+  const { approved, rejected } = await engine.evaluateDecisions();
+  await engine.createEntryOrders(approved);
+  await engine.matchFills();
+  await engine.evalBrackets();
+  await engine.handleExpiries();
+  await engine.checkInvariants();
+  const stats = {
+    decisions_evaluated: approved.length + rejected.length,
+    decisions_approved: approved.length,
+    decisions_rejected: rejected.length,
+  };
+  await engine.endTick(stats);
+  return { run_id: engine.run_id, stats };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // HTTP HANDLER
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -756,22 +824,15 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const headers = { ...corsHeaders, "Content-Type": "application/json" };
+
   try {
     const sb = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const { symbol, timeframe, candle } = await req.json();
-
-    if (!symbol || !timeframe || !candle) {
-      return new Response(
-        JSON.stringify({ error: "Missing: symbol, timeframe, candle" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    // Fetch active policy
+    // Fetch active policy (shared by all modes)
     const { data: policy, error: pe } = await sb
       .from("paper_policy")
       .select("*")
@@ -781,34 +842,65 @@ serve(async (req) => {
       .single();
 
     if (pe || !policy) {
+      return new Response(JSON.stringify({ error: "No active policy found" }), { status: 500, headers });
+    }
+
+    // Parse body once
+    let body: any = {};
+    try { body = await req.json(); } catch { /* empty body ok */ }
+
+    // ── Mode 1: tick-all (cron) — auto-fetch candles for all incorporated assets
+    const url = new URL(req.url);
+    const action = url.searchParams.get("action") || body.action;
+
+    if (action === "tick-all") {
+      const { data: assets } = await sb
+        .from("incorporated_assets")
+        .select("asset_id, default_timeframe")
+        .eq("is_enabled", true);
+
+      if (!assets?.length) {
+        return new Response(JSON.stringify({ ok: true, message: "No enabled assets" }), { status: 200, headers });
+      }
+
+      const results: any[] = [];
+      for (const asset of assets) {
+        const candle = await fetchLatestCandle(asset.asset_id, asset.default_timeframe);
+        if (!candle) {
+          results.push({ asset: asset.asset_id, error: "candle_fetch_failed" });
+          continue;
+        }
+        try {
+          const r = await runSingleTick(sb, asset.asset_id, asset.default_timeframe, candle, policy);
+          results.push({ asset: asset.asset_id, timeframe: asset.default_timeframe, ...r });
+        } catch (e: any) {
+          results.push({ asset: asset.asset_id, error: e.message });
+        }
+      }
+      return new Response(JSON.stringify({ ok: true, results }), { status: 200, headers });
+    }
+
+    // ── Mode 2: single tick (manual / explicit candle)
+    const { symbol, timeframe, candle } = body;
+
+    if (!symbol || !timeframe) {
       return new Response(
-        JSON.stringify({ error: "No active policy found" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({ error: "Missing: symbol, timeframe (and candle for single mode)" }),
+        { status: 400, headers },
       );
     }
 
-    const engine = new PaperEngineCore(sb, symbol, timeframe, candle, policy);
-    await engine.startTick();
+    // Auto-fetch candle if not provided
+    const resolvedCandle = candle || await fetchLatestCandle(symbol, timeframe);
+    if (!resolvedCandle) {
+      return new Response(
+        JSON.stringify({ error: `Could not fetch candle for ${symbol}/${timeframe}` }),
+        { status: 502, headers },
+      );
+    }
 
-    const { approved, rejected } = await engine.evaluateDecisions();
-    await engine.createEntryOrders(approved);
-    await engine.matchFills();
-    await engine.evalBrackets();
-    await engine.handleExpiries();
-    await engine.checkInvariants();
-
-    const stats = {
-      decisions_evaluated: approved.length + rejected.length,
-      decisions_approved: approved.length,
-      decisions_rejected: rejected.length,
-    };
-
-    await engine.endTick(stats);
-
-    return new Response(
-      JSON.stringify({ ok: true, run_id: engine.run_id, stats }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    const result = await runSingleTick(sb, symbol, timeframe, resolvedCandle, policy);
+    return new Response(JSON.stringify({ ok: true, ...result }), { status: 200, headers });
   } catch (err: any) {
     console.error("Engine tick error:", err);
     return new Response(
