@@ -25,6 +25,35 @@ const INFLUENCE_MODES: Record<number, string> = {
   3: "Sizing",
 };
 
+// ─── BUY & HOLD HORIZON CONFIGURATION ────────────────────────────
+const PUBLIC_HORIZONS = ["6m", "1y", "3y", "5y"];
+const LEARNING_HORIZONS = ["3m", "6m", "1y", "3y", "5y"];
+
+const CADENCE_MAP: Record<string, string> = {
+  "3m": "weekly",
+  "6m": "monthly",
+  "1y": "monthly",
+  "3y": "monthly",
+  "5y": "monthly",
+};
+
+// Neutral band config per horizon for directional accuracy
+const NEUTRAL_BAND_CONFIG: Record<string, { minBand: number; atrMultiplier: number }> = {
+  "3m": { minBand: 0.01, atrMultiplier: 0.6 },   // tighter for short horizon
+  "6m": { minBand: 0.015, atrMultiplier: 0.25 },
+  "1y": { minBand: 0.015, atrMultiplier: 0.25 },
+  "3y": { minBand: 0.015, atrMultiplier: 0.25 },
+  "5y": { minBand: 0.015, atrMultiplier: 0.25 },
+  "24h": { minBand: 0.0015, atrMultiplier: 0.25 }, // legacy trading horizon
+};
+
+// BH Level 1 fast-track gates (3m only accelerates L1)
+const BH_L1_FAST_GATES = {
+  minDirAcc: 0.62,
+  minEvBh: 0,
+  minDecisions: 40,
+};
+
 // ─── RECORD DECISION ──────────────────────────────────────────────
 async function recordDecision(body: any) {
   const { asset_id, timeframe, horizon, ref_price, direction_pred, probability_pred, agreement_score, consensus_score, completeness_score, evidence_snapshot_json } = body;
@@ -59,9 +88,8 @@ async function recordTrade(body: any) {
 }
 
 // ─── EVALUATE DECISIONS ───────────────────────────────────────────
-async function evaluateDecisions(asset_id: string) {
-  // Fetch unevaluated decisions older than their horizon
-  const { data: decisions, error } = await supabase
+async function evaluateDecisions(asset_id: string, horizon?: string) {
+  let query = supabase
     .from("paper_decisions")
     .select("*")
     .eq("asset_id", asset_id)
@@ -69,16 +97,19 @@ async function evaluateDecisions(asset_id: string) {
     .order("ts", { ascending: true })
     .limit(100);
 
+  if (horizon) query = query.eq("horizon", horizon);
+
+  const { data: decisions, error } = await query;
   if (error) throw error;
   if (!decisions?.length) return { evaluated: 0 };
 
-  // Fetch current price from crypto-data edge function
+  // Fetch current price
   const priceRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=market&symbols=${asset_id}`);
   const priceJson = await priceRes.json();
   const currentPrice = priceJson.data?.[0]?.price;
   if (!currentPrice) return { evaluated: 0, error: "Could not fetch current price" };
 
-  // Also fetch ATR for neutral band
+  // ATR for neutral band
   const klinesRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=analysis&symbols=${asset_id}`);
   const klinesJson = await klinesRes.json();
   const atrSignal = klinesJson.data?.scenarios?.[0]?.evidence?.find((e: any) => e.signal === "ATR");
@@ -89,15 +120,16 @@ async function evaluateDecisions(asset_id: string) {
   const now = new Date();
 
   for (const d of decisions) {
-    // Check if horizon has elapsed
     const horizonHours = parseHorizon(d.horizon);
     const decisionTime = new Date(d.ts);
     const evalTime = new Date(decisionTime.getTime() + horizonHours * 60 * 60 * 1000);
-    
     if (now < evalTime) continue;
 
+    // Use horizon-specific neutral band config
+    const bandCfg = NEUTRAL_BAND_CONFIG[d.horizon] || NEUTRAL_BAND_CONFIG["24h"];
+    const neutralBand = Math.max(bandCfg.minBand, bandCfg.atrMultiplier * atrPct);
+
     const movePct = (currentPrice - d.ref_price) / d.ref_price;
-    const neutralBand = Math.max(0.0015, 0.25 * atrPct);
 
     let realizedDir: string;
     if (movePct > neutralBand) realizedDir = "UP";
@@ -116,8 +148,11 @@ async function evaluateDecisions(asset_id: string) {
     evaluated++;
   }
 
-  // Update graduation status
-  await updateGraduation(asset_id);
+  // Update graduation for all relevant horizons
+  const horizonsToUpdate = horizon ? [horizon] : [...new Set(decisions.map(d => d.horizon))];
+  for (const h of horizonsToUpdate) {
+    await updateGraduation(asset_id, decisions[0]?.timeframe || "4h", h);
+  }
 
   return { evaluated };
 }
@@ -129,7 +164,6 @@ async function evaluateTrades(asset_id: string) {
   const currentPrice = priceJson.data?.[0]?.price;
   if (!currentPrice) return { evaluated: 0 };
 
-  // Check PENDING trades for fill
   const { data: pending } = await supabase
     .from("paper_trades")
     .select("*")
@@ -159,7 +193,6 @@ async function evaluateTrades(asset_id: string) {
     }
   }
 
-  // Check OPEN trades for stop/target/expiry
   const { data: open } = await supabase
     .from("paper_trades")
     .select("*")
@@ -176,15 +209,10 @@ async function evaluateTrades(asset_id: string) {
       ? (currentPrice - t.fill_price) / riskR
       : (t.fill_price - currentPrice) / riskR;
 
-    // Check stop
     const stopped = isBull ? currentPrice <= t.stop_level : currentPrice >= t.stop_level;
-
-    // Check targets
     const targets = (t.targets_json || []) as { price: number }[];
     const lastTarget = targets[targets.length - 1];
     const targetHit = lastTarget && (isBull ? currentPrice >= lastTarget.price : currentPrice <= lastTarget.price);
-
-    // Check time expiry
     const expired = t.time_window_end && new Date() > new Date(t.time_window_end);
 
     if (stopped || targetHit || expired) {
@@ -205,8 +233,8 @@ async function evaluateTrades(asset_id: string) {
         outcome_label: outcome,
         return_pct: returnPct,
         return_r: currentR,
-        mae_r: Math.min(0, currentR), // simplified
-        mfe_r: Math.max(0, currentR), // simplified
+        mae_r: Math.min(0, currentR),
+        mfe_r: Math.max(0, currentR),
       }).eq("id", t.id);
       closed++;
     }
@@ -218,7 +246,6 @@ async function evaluateTrades(asset_id: string) {
 
 // ─── UPDATE GRADUATION ───────────────────────────────────────────
 async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "24h") {
-  // Count decisions
   const { count: nDecisions } = await supabase
     .from("paper_decisions")
     .select("*", { count: "exact", head: true })
@@ -226,7 +253,6 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
     .eq("timeframe", timeframe)
     .eq("horizon", horizon);
 
-  // Count correct decisions
   const { count: nCorrect } = await supabase
     .from("paper_decisions")
     .select("*", { count: "exact", head: true })
@@ -246,7 +272,6 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
 
   const dirAcc = (nEvaluated || 0) > 0 ? (nCorrect || 0) / (nEvaluated || 1) : 0;
 
-  // Get trade stats
   const { data: closedTrades } = await supabase
     .from("paper_trades")
     .select("return_r")
@@ -267,8 +292,23 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
   const sorted = [...returns].sort((a, b) => a - b);
   const medianR = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
 
-  // Determine graduation level
+  // Determine graduation level with BH fast-track logic
   let level = 0;
+
+  // Check if 3m can fast-track Level 1 (BH only)
+  const isBhHorizon = LEARNING_HORIZONS.includes(horizon);
+  if (isBhHorizon && horizon === "3m") {
+    // 3m can only accelerate L1
+    if (
+      dirAcc >= BH_L1_FAST_GATES.minDirAcc &&
+      avgR > BH_L1_FAST_GATES.minEvBh &&
+      (nDecisions || 0) >= BH_L1_FAST_GATES.minDecisions
+    ) {
+      level = 1;
+    }
+  }
+
+  // Standard graduation gates (L1–L3), override if higher
   for (let l = 3; l >= 1; l--) {
     const gate = GRADUATION_GATES[l as 1 | 2 | 3];
     if (
@@ -277,9 +317,14 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
       dirAcc >= gate.minDirAcc &&
       avgR >= gate.minAvgR
     ) {
-      level = l;
+      level = Math.max(level, l);
       break;
     }
+  }
+
+  // For 3m horizon: cap at L1 to prevent short-horizon overfitting
+  if (horizon === "3m" && level > 1) {
+    level = 1;
   }
 
   await supabase.from("graduation_status").upsert({
@@ -296,11 +341,11 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
     updated_at: new Date().toISOString(),
   }, { onConflict: "asset_id,timeframe,horizon" });
 
-  return { level, dirAcc, avgR, medianR, nDecisions, nOpened };
+  return { level, dirAcc, avgR, medianR, nDecisions, nOpened, horizon };
 }
 
 // ─── FETCH STATS ──────────────────────────────────────────────────
-async function fetchStats(asset_id?: string) {
+async function fetchStats(asset_id?: string, includeLearning = false) {
   let decisionsQuery = supabase.from("paper_decisions").select("*").order("ts", { ascending: false }).limit(200);
   let tradesQuery = supabase.from("paper_trades").select("*").order("ts_created", { ascending: false }).limit(200);
   let gradQuery = supabase.from("graduation_status").select("*");
@@ -315,7 +360,7 @@ async function fetchStats(asset_id?: string) {
     decisionsQuery, tradesQuery, gradQuery,
   ]);
 
-  // Compute confusion matrix from evaluated decisions
+  // Compute confusion matrix
   const evaluated = (decisions.data || []).filter(d => d.evaluated_at);
   const confusionMatrix = { UP: { UP: 0, DOWN: 0, NEUTRAL: 0 }, DOWN: { UP: 0, DOWN: 0, NEUTRAL: 0 }, NEUTRAL: { UP: 0, DOWN: 0, NEUTRAL: 0 } };
   for (const d of evaluated) {
@@ -328,24 +373,56 @@ async function fetchStats(asset_id?: string) {
   const closedTrades = (trades.data || []).filter(t => t.status === "CLOSED" && t.mae_r !== null);
   const maeDistribution = closedTrades.map(t => t.mae_r);
 
+  // BH horizon breakdown: compute per-horizon stats for 3m fast feedback
+  const bhHorizonStats: Record<string, any> = {};
+  for (const h of LEARNING_HORIZONS) {
+    const hDecisions = (decisions.data || []).filter(d => d.horizon === h);
+    const hEvaluated = hDecisions.filter(d => d.evaluated_at);
+    const hCorrect = hEvaluated.filter(d => d.correct);
+    const hDirAcc = hEvaluated.length > 0 ? hCorrect.length / hEvaluated.length : 0;
+
+    const hGrad = (graduation.data || []).find(g => g.horizon === h);
+
+    bhHorizonStats[h] = {
+      totalDecisions: hDecisions.length,
+      evaluatedDecisions: hEvaluated.length,
+      correctDecisions: hCorrect.length,
+      dirAcc: hDirAcc,
+      avgReturnR: hGrad?.avg_return_r ?? 0,
+      graduationLevel: hGrad?.graduation_level ?? 0,
+      cadence: CADENCE_MAP[h] || "monthly",
+      isLearningOnly: !PUBLIC_HORIZONS.includes(h),
+      contributedToL1: h === "3m" && hGrad?.graduation_level === 1 &&
+        hDirAcc >= BH_L1_FAST_GATES.minDirAcc &&
+        hDecisions.length >= BH_L1_FAST_GATES.minDecisions,
+    };
+  }
+
   return {
     decisions: decisions.data || [],
     trades: trades.data || [],
     graduation: graduation.data || [],
     confusionMatrix,
     maeDistribution,
+    bhHorizonStats,
+    config: {
+      publicHorizons: PUBLIC_HORIZONS,
+      learningHorizons: LEARNING_HORIZONS,
+      cadenceMap: CADENCE_MAP,
+    },
   };
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────
 function parseHorizon(horizon: string): number {
-  const match = horizon.match(/(\d+)(h|d|m)/);
+  const match = horizon.match(/(\d+)(h|d|m|y)/);
   if (!match) return 24;
   const [, val, unit] = match;
   const n = parseInt(val);
   if (unit === "h") return n;
   if (unit === "d") return n * 24;
-  if (unit === "m") return n / 60;
+  if (unit === "m") return n * 30 * 24;    // months
+  if (unit === "y") return n * 365 * 24;   // years
   return 24;
 }
 
@@ -359,9 +436,10 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "stats";
     const asset = url.searchParams.get("asset");
+    const includeLearning = url.searchParams.get("learning") === "true";
 
     if (action === "stats") {
-      const stats = await fetchStats(asset || undefined);
+      const stats = await fetchStats(asset || undefined, includeLearning);
       return new Response(JSON.stringify({ data: stats }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -385,8 +463,9 @@ serve(async (req) => {
 
     if (action === "evaluate") {
       if (!asset) throw new Error("asset parameter required");
+      const horizon = url.searchParams.get("horizon") || undefined;
       const [decResult, tradeResult] = await Promise.all([
-        evaluateDecisions(asset),
+        evaluateDecisions(asset, horizon),
         evaluateTrades(asset),
       ]);
       return new Response(JSON.stringify({ data: { decisions: decResult, trades: tradeResult } }), {
@@ -396,7 +475,8 @@ serve(async (req) => {
 
     if (action === "graduation") {
       if (!asset) throw new Error("asset parameter required");
-      const result = await updateGraduation(asset);
+      const horizon = url.searchParams.get("horizon") || "24h";
+      const result = await updateGraduation(asset, "4h", horizon);
       return new Response(JSON.stringify({ data: result }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paper-engine`;
 
@@ -27,10 +26,13 @@ async function callPaperEngine(action: string, params: Record<string, string> = 
   return res.json();
 }
 
-export function usePaperStats(asset?: string) {
+export function usePaperStats(asset?: string, includeLearning = false) {
   return useQuery({
-    queryKey: ["paper-stats", asset],
-    queryFn: () => callPaperEngine("stats", asset ? { asset } : {}),
+    queryKey: ["paper-stats", asset, includeLearning],
+    queryFn: () => callPaperEngine("stats", {
+      ...(asset ? { asset } : {}),
+      ...(includeLearning ? { learning: "true" } : {}),
+    }),
     refetchInterval: 30_000,
   });
 }
@@ -54,7 +56,8 @@ export function useRecordTrade() {
 export function useEvaluate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (asset: string) => callPaperEngine("evaluate", { asset }),
+    mutationFn: ({ asset, horizon }: { asset: string; horizon?: string }) =>
+      callPaperEngine("evaluate", { asset, ...(horizon ? { horizon } : {}) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["paper-stats"] }),
   });
 }

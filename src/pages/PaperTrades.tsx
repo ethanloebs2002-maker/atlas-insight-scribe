@@ -7,14 +7,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Play, Pause, Download, RotateCcw, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock } from "lucide-react";
 
 const ASSETS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
 
 export default function PaperTrades() {
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [paused, setPaused] = useState(false);
-  const { data: statsRes, isLoading } = usePaperStats(selectedAsset);
+  const [showLearning, setShowLearning] = useState(false);
+  const { data: statsRes, isLoading } = usePaperStats(selectedAsset, true);
   const evaluate = useEvaluate();
 
   const stats = statsRes?.data;
@@ -22,12 +24,13 @@ export default function PaperTrades() {
   const trades = stats?.trades || [];
   const graduation = stats?.graduation || [];
   const confusionMatrix = stats?.confusionMatrix || { UP: { UP: 0, DOWN: 0, NEUTRAL: 0 }, DOWN: { UP: 0, DOWN: 0, NEUTRAL: 0 }, NEUTRAL: { UP: 0, DOWN: 0, NEUTRAL: 0 } };
+  const bhHorizonStats = stats?.bhHorizonStats || {};
+  const config = stats?.config || { publicHorizons: ["6m", "1y", "3y", "5y"], learningHorizons: ["3m", "6m", "1y", "3y", "5y"], cadenceMap: {} };
 
   const openTrades = trades.filter((t: any) => t.status === "OPEN");
   const closedTrades = trades.filter((t: any) => t.status === "CLOSED");
   const pendingTrades = trades.filter((t: any) => t.status === "PENDING");
 
-  // Compute summary stats
   const evaluatedDecisions = decisions.filter((d: any) => d.evaluated_at);
   const correctDecisions = evaluatedDecisions.filter((d: any) => d.correct);
   const dirAcc = evaluatedDecisions.length > 0 ? (correctDecisions.length / evaluatedDecisions.length * 100) : 0;
@@ -39,6 +42,9 @@ export default function PaperTrades() {
 
   const wins = closedTrades.filter((t: any) => t.outcome_label === "WIN").length;
   const losses = closedTrades.filter((t: any) => t.outcome_label === "LOSS").length;
+
+  // Visible horizons based on toggle
+  const visibleHorizons = showLearning ? config.learningHorizons : config.publicHorizons;
 
   return (
     <div className="space-y-6">
@@ -62,7 +68,11 @@ export default function PaperTrades() {
             {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
             {paused ? "Resume" : "Pause"}
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs font-mono gap-1.5" onClick={() => selectedAsset && evaluate.mutate(selectedAsset)} disabled={!selectedAsset || evaluate.isPending}>
+          <Button
+            variant="outline" size="sm" className="h-8 text-xs font-mono gap-1.5"
+            onClick={() => selectedAsset && evaluate.mutate({ asset: selectedAsset })}
+            disabled={!selectedAsset || evaluate.isPending}
+          >
             <Target className="h-3 w-3" />
             Evaluate
           </Button>
@@ -90,6 +100,10 @@ export default function PaperTrades() {
           <TabsTrigger value="closed">Closed Trades ({closedTrades.length})</TabsTrigger>
           <TabsTrigger value="health">Learning Health</TabsTrigger>
           <TabsTrigger value="graduation">Graduation</TabsTrigger>
+          <TabsTrigger value="bh-learning" className="text-xs gap-1">
+            <Zap className="h-3 w-3" />
+            B&H Learning
+          </TabsTrigger>
         </TabsList>
 
         {/* ─── DECISIONS STREAM ────────────────────────────── */}
@@ -107,6 +121,7 @@ export default function PaperTrades() {
                     <TableHead className="text-[10px] font-mono">PRED</TableHead>
                     <TableHead className="text-[10px] font-mono">PROB</TableHead>
                     <TableHead className="text-[10px] font-mono">REF PRICE</TableHead>
+                    <TableHead className="text-[10px] font-mono">HORIZON</TableHead>
                     <TableHead className="text-[10px] font-mono">AGREEMENT</TableHead>
                     <TableHead className="text-[10px] font-mono">REALIZED</TableHead>
                     <TableHead className="text-[10px] font-mono">CORRECT</TableHead>
@@ -114,7 +129,7 @@ export default function PaperTrades() {
                 </TableHeader>
                 <TableBody>
                   {decisions.length === 0 ? (
-                    <TableRow><TableCell colSpan={8} className="text-center text-xs text-muted-foreground py-8 font-mono">No decisions recorded yet. Run an analysis to generate decisions.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={9} className="text-center text-xs text-muted-foreground py-8 font-mono">No decisions recorded yet. Run an analysis to generate decisions.</TableCell></TableRow>
                   ) : decisions.slice(0, 50).map((d: any) => (
                     <TableRow key={d.id}>
                       <TableCell className="text-[10px] font-mono text-muted-foreground">{new Date(d.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</TableCell>
@@ -122,6 +137,7 @@ export default function PaperTrades() {
                       <TableCell><DirBadge dir={d.direction_pred} /></TableCell>
                       <TableCell className="text-[10px] font-mono">{(d.probability_pred * 100).toFixed(0)}%</TableCell>
                       <TableCell className="text-[10px] font-mono">${Number(d.ref_price).toLocaleString()}</TableCell>
+                      <TableCell><Badge variant="secondary" className="text-[9px] font-mono">{d.horizon}</Badge></TableCell>
                       <TableCell className="text-[10px] font-mono">{(d.agreement_score * 100).toFixed(0)}%</TableCell>
                       <TableCell>{d.realized_dir ? <DirBadge dir={d.realized_dir} /> : <span className="text-[10px] text-muted-foreground font-mono">pending</span>}</TableCell>
                       <TableCell>{d.evaluated_at ? (d.correct ? <CheckCircle2 className="h-3.5 w-3.5 text-bullish" /> : <XCircle className="h-3.5 w-3.5 text-bearish" />) : <Minus className="h-3.5 w-3.5 text-muted-foreground" />}</TableCell>
@@ -220,7 +236,6 @@ export default function PaperTrades() {
         {/* ─── LEARNING HEALTH ─────────────────────────────── */}
         <TabsContent value="health">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Confusion Matrix */}
             <Card>
               <CardHeader className="py-3 px-4">
                 <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Confusion Matrix</CardTitle>
@@ -249,7 +264,6 @@ export default function PaperTrades() {
               </CardContent>
             </Card>
 
-            {/* R Distribution */}
             <Card>
               <CardHeader className="py-3 px-4">
                 <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Expectancy Metrics</CardTitle>
@@ -282,6 +296,7 @@ export default function PaperTrades() {
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-mono font-bold">{g.asset_id}</span>
                     <Badge variant="secondary" className="text-[9px] font-mono">{g.timeframe} / {g.horizon}</Badge>
+                    {g.horizon === "3m" && <Badge variant="outline" className="text-[9px] font-mono border-primary/30 text-primary"><Zap className="h-2.5 w-2.5 mr-1" />FAST</Badge>}
                   </div>
                   <div className="flex items-center gap-2">
                     <GraduationLevelBadge level={g.graduation_level} />
@@ -291,28 +306,31 @@ export default function PaperTrades() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {/* Gates */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <GateCard label="Decisions" value={g.n_decisions} required={500} />
-                    <GateCard label="Opened Trades" value={g.n_opened_trades} required={150} />
-                    <GateCard label="Dir. Accuracy" value={`${(Number(g.dir_acc) * 100).toFixed(1)}%`} required="≥65%" pass={Number(g.dir_acc) >= 0.65} />
+                    <GateCard label="Decisions" value={g.n_decisions} required={g.horizon === "3m" ? 40 : 500} />
+                    <GateCard label="Opened Trades" value={g.n_opened_trades} required={g.horizon === "3m" ? "—" : 150} pass={g.horizon === "3m" ? true : undefined} />
+                    <GateCard label="Dir. Accuracy" value={`${(Number(g.dir_acc) * 100).toFixed(1)}%`} required={g.horizon === "3m" ? "≥62%" : "≥65%"} pass={Number(g.dir_acc) >= (g.horizon === "3m" ? 0.62 : 0.65)} />
                     <GateCard label="Avg Return R" value={Number(g.avg_return_r).toFixed(4)} required=">0.00" pass={Number(g.avg_return_r) > 0} />
                   </div>
-                  {/* Progress to next level */}
-                  {g.graduation_level < 3 && (
+                  {g.graduation_level < (g.horizon === "3m" ? 1 : 3) && (
                     <div className="space-y-1">
                       <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
-                        <span>Progress to Level {g.graduation_level + 1}</span>
-                        <span>{Math.min(100, Math.round((g.n_decisions / 500) * 100))}%</span>
+                        <span>Progress to Level {g.graduation_level + 1}{g.horizon === "3m" ? " (max)" : ""}</span>
+                        <span>{Math.min(100, Math.round((g.n_decisions / (g.horizon === "3m" ? 40 : 500)) * 100))}%</span>
                       </div>
-                      <Progress value={Math.min(100, (g.n_decisions / 500) * 100)} className="h-1.5" />
+                      <Progress value={Math.min(100, (g.n_decisions / (g.horizon === "3m" ? 40 : 500)) * 100)} className="h-1.5" />
+                    </div>
+                  )}
+                  {g.horizon === "3m" && g.graduation_level >= 1 && (
+                    <div className="text-[10px] font-mono text-primary flex items-center gap-1.5 bg-primary/5 rounded-md px-3 py-2 border border-primary/10">
+                      <CheckCircle2 className="h-3 w-3" />
+                      3m horizon contributed to L1 unlock (capped at L1)
                     </div>
                   )}
                 </CardContent>
               </Card>
             ))}
 
-            {/* Learning Firewall Legend */}
             <Card>
               <CardHeader className="py-3 px-4">
                 <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -341,8 +359,139 @@ export default function PaperTrades() {
             </Card>
           </div>
         </TabsContent>
+
+        {/* ─── BUY & HOLD LEARNING ─────────────────────────── */}
+        <TabsContent value="bh-learning">
+          <div className="space-y-4">
+            {/* Toggle */}
+            <Card>
+              <CardContent className="py-3 px-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-primary" />
+                  <span className="text-xs font-mono font-bold">Show learning horizons (advanced)</span>
+                  <span className="text-[9px] font-mono text-muted-foreground">Reveals 3m in charts/tables</span>
+                </div>
+                <Switch checked={showLearning} onCheckedChange={setShowLearning} />
+              </CardContent>
+            </Card>
+
+            {/* Fast Feedback (3m) Card */}
+            <FastFeedbackCard stats={bhHorizonStats["3m"]} />
+
+            {/* All BH Horizon Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {visibleHorizons.map(h => {
+                const hStats = bhHorizonStats[h];
+                if (!hStats) return null;
+                return (
+                  <Card key={h} className={`overflow-hidden ${h === "3m" ? "border-primary/20" : ""}`}>
+                    <CardHeader className="py-3 px-4 flex flex-row items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-mono font-bold">{h.toUpperCase()}</span>
+                        {hStats.isLearningOnly && (
+                          <Badge variant="outline" className="text-[9px] font-mono border-primary/30 text-primary">LEARNING</Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-[9px] font-mono text-muted-foreground">{hStats.cadence}</span>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <MetricRow label="Total Decisions" value={String(hStats.totalDecisions)} />
+                      <MetricRow label="Evaluated" value={String(hStats.evaluatedDecisions)} />
+                      <MetricRow label="Dir. Accuracy" value={hStats.evaluatedDecisions > 0 ? `${(hStats.dirAcc * 100).toFixed(1)}%` : "—"} positive={hStats.dirAcc >= 0.62} />
+                      <MetricRow label="Avg Return R" value={Number(hStats.avgReturnR).toFixed(4)} positive={Number(hStats.avgReturnR) > 0} />
+                      <MetricRow label="Graduation Level" value={`L${hStats.graduationLevel}`} />
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* Cadence Reference */}
+            <Card>
+              <CardHeader className="py-3 px-4">
+                <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <Clock className="h-3.5 w-3.5" />
+                  Cadence Rules
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {Object.entries(config.cadenceMap || {}).map(([horizon, cadence]) => (
+                    <div key={horizon} className={`rounded-lg border p-2.5 space-y-0.5 ${horizon === "3m" ? "border-primary/20 bg-primary/5" : "border-border bg-secondary/30"}`}>
+                      <div className="text-xs font-mono font-bold">{horizon.toUpperCase()}</div>
+                      <div className="text-[9px] font-mono text-muted-foreground uppercase">{cadence as string}</div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+// ─── FAST FEEDBACK (3M) CARD ─────────────────────────────────────
+function FastFeedbackCard({ stats }: { stats: any }) {
+  if (!stats) {
+    return (
+      <Card className="border-primary/20">
+        <CardContent className="py-8 text-center">
+          <Zap className="h-6 w-6 text-primary mx-auto mb-2" />
+          <p className="text-xs font-mono text-muted-foreground">No 3m horizon data yet. Weekly decisions will populate this.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const dirAccPct = stats.evaluatedDecisions > 0 ? (stats.dirAcc * 100).toFixed(1) : "—";
+  const passesL1 = stats.dirAcc >= 0.62 && Number(stats.avgReturnR) > 0 && stats.totalDecisions >= 40;
+
+  return (
+    <Card className="border-primary/20 overflow-hidden">
+      <CardHeader className="py-3 px-4 bg-primary/5">
+        <CardTitle className="text-xs font-mono uppercase tracking-wider flex items-center gap-2">
+          <Zap className="h-4 w-4 text-primary" />
+          <span className="text-primary">Fast Feedback (3m)</span>
+          <Badge variant="outline" className="text-[9px] font-mono border-primary/30 text-primary ml-auto">
+            WEEKLY CADENCE
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <GateCard label="DirAcc 3m" value={`${dirAccPct}%`} required="≥62%" pass={stats.dirAcc >= 0.62} />
+          <GateCard label="EV_BH 3m" value={Number(stats.avgReturnR).toFixed(4)} required=">0" pass={Number(stats.avgReturnR) > 0} />
+          <GateCard label="Sample Size" value={stats.totalDecisions} required={40} />
+          <div className={`rounded-lg border p-2.5 space-y-1 ${passesL1 ? "border-bullish/30 bg-bullish/5" : stats.contributedToL1 ? "border-primary/30 bg-primary/5" : "border-border bg-secondary/30"}`}>
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-mono text-muted-foreground uppercase">L1 Unlock</span>
+              {passesL1 || stats.contributedToL1 ? <CheckCircle2 className="h-3 w-3 text-bullish" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
+            </div>
+            <div className="text-xs font-mono font-bold">{passesL1 ? "ELIGIBLE" : stats.contributedToL1 ? "CONTRIBUTED" : "NOT YET"}</div>
+            <div className="text-[9px] font-mono text-muted-foreground">accelerates L1 only</div>
+          </div>
+        </div>
+
+        {stats.totalDecisions > 0 && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
+              <span>L1 Fast-Track Progress</span>
+              <span>{Math.min(100, Math.round((stats.totalDecisions / 40) * 100))}%</span>
+            </div>
+            <Progress value={Math.min(100, (stats.totalDecisions / 40) * 100)} className="h-1.5" />
+          </div>
+        )}
+
+        <div className="text-[9px] font-mono text-muted-foreground bg-secondary/50 rounded-md px-3 py-2 border border-border">
+          <strong className="text-foreground">NOTE:</strong> 3m DirAcc contributes to "Learning Confidence" but does NOT override 6m+ gates. Levels 2–3 still require standard 6m+ criteria.
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
