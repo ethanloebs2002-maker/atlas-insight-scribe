@@ -3,32 +3,47 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "@/hooks/use-auth";
+import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
 import AssetSearch from "@/pages/AssetSearch";
 import Dashboard from "@/pages/Dashboard";
 import WhaleWatch from "@/pages/WhaleWatch";
 import PaperTrades from "@/pages/PaperTrades";
+import Login from "@/pages/Login";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AppLayout>
+    <AuthProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
           <Routes>
-            <Route path="/" element={<AssetSearch />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/whale-watch" element={<WhaleWatch />} />
-            <Route path="/paper-trades" element={<PaperTrades />} />
-            <Route path="*" element={<NotFound />} />
+            <Route path="/login" element={<Login />} />
+            <Route
+              path="/*"
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <Routes>
+                      <Route path="/" element={<AssetSearch />} />
+                      <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/whale-watch" element={<WhaleWatch />} />
+                      <Route path="/paper-trades" element={<PaperTrades />} />
+                      <Route path="*" element={<NotFound />} />
+                    </Routes>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
           </Routes>
-        </AppLayout>
-      </BrowserRouter>
-    </TooltipProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </AuthProvider>
   </QueryClientProvider>
 );
 
