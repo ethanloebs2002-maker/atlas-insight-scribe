@@ -8,11 +8,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft, BarChart3, Sparkles, Search } from "lucide-react";
+import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft, BarChart3, Sparkles, Search, ShieldAlert, Scan } from "lucide-react";
 import LearningSourcesPanel from "@/components/LearningSourcesPanel";
 import IndicatorBreakdownPanel from "@/components/IndicatorBreakdownPanel";
 import IndicatorReliabilityPanel from "@/components/IndicatorReliabilityPanel";
 import IndicatorPatternsPanel from "@/components/IndicatorPatternsPanel";
+import SystemStatusBanner from "@/components/SystemStatusBanner";
+import PatternTierPanel from "@/components/PatternTierPanel";
+import AnomalyPanel from "@/components/AnomalyPanel";
 
 const ASSETS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
 
@@ -52,6 +55,8 @@ export default function PaperTrades() {
 
   return (
     <div className="space-y-6">
+      {/* System Status Banner */}
+      <SystemStatusBanner asset={selectedAsset} />
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -123,6 +128,14 @@ export default function PaperTrades() {
           <TabsTrigger value="patterns" className="text-xs gap-1">
             <Sparkles className="h-3 w-3" />
             Patterns
+          </TabsTrigger>
+          <TabsTrigger value="pattern-tiers" className="text-xs gap-1">
+            <ShieldAlert className="h-3 w-3" />
+            Pattern Tiers
+          </TabsTrigger>
+          <TabsTrigger value="anomalies" className="text-xs gap-1">
+            <Scan className="h-3 w-3" />
+            Anomalies
           </TabsTrigger>
         </TabsList>
 
@@ -469,6 +482,16 @@ export default function PaperTrades() {
         {/* ─── PATTERNS ────────────────────────────────────── */}
         <TabsContent value="patterns">
           <IndicatorPatternsPanel selectedAsset={selectedAsset} />
+        </TabsContent>
+
+        {/* ─── PATTERN TIERS ─────────────────────────────────── */}
+        <TabsContent value="pattern-tiers">
+          <PatternTierPanel selectedAsset={selectedAsset} />
+        </TabsContent>
+
+        {/* ─── ANOMALIES ─────────────────────────────────────── */}
+        <TabsContent value="anomalies">
+          <AnomalyPanel selectedAsset={selectedAsset} />
         </TabsContent>
       </Tabs>
     </div>

@@ -8,6 +8,7 @@ import ConsensusReport from '@/components/ConsensusReport';
 import EvidenceTable from '@/components/EvidenceTable';
 import WhaleTable from '@/components/WhaleTable';
 import AdvancedChart from '@/components/AdvancedChart';
+import SystemStatusBanner from '@/components/SystemStatusBanner';
 import { Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -24,6 +25,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* System Status Banner */}
+      <SystemStatusBanner asset={symbol} />
+
       {/* Data source indicator */}
       <div className="flex items-center gap-2">
         {isLoading && (
