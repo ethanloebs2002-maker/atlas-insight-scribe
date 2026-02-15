@@ -548,7 +548,13 @@ export default function PaperTrades() {
 
 function DecisionRow({ d, selected, onClick, debugProb = false }: { d: any; selected: boolean; onClick: () => void; debugProb?: boolean }) {
   const probValue = Number(d.probability_pred);
-  const probDisplay = Number.isFinite(probValue) ? (probValue * 100).toFixed(2) : "—";
+  const isBug = !Number.isFinite(probValue) || probValue > 1 || probValue < 0;
+
+  if (isBug) {
+    console.error(`[PROB BUG] Decision ${d.id}: probability_pred=${d.probability_pred}, source=${d.probability_source || "unknown"}`);
+  }
+
+  const probDisplay = isBug ? String(d.probability_pred) : (probValue * 100).toFixed(2);
 
   return (
     <button
@@ -560,9 +566,11 @@ function DecisionRow({ d, selected, onClick, debugProb = false }: { d: any; sele
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[10px] font-mono font-bold shrink-0">{d.asset_id}</span>
         <DirBadge dir={d.direction_pred} />
-        <span className="text-[10px] font-mono font-bold">
-          {probDisplay}%
-        </span>
+        {isBug ? (
+          <Badge variant="destructive" className="text-[8px] font-mono">PROB BUG {probDisplay}</Badge>
+        ) : (
+          <span className="text-[10px] font-mono font-bold">{probDisplay}%</span>
+        )}
         <div className="flex-1" />
         {d.correct != null && (
           d.correct
