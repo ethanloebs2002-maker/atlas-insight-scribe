@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { CADENCE_MS, getEvalCadence } from "@/lib/eval-cadence";
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auto-eval`;
 
@@ -43,5 +44,20 @@ export function useIncorporatedAssets() {
     queryKey: ["incorporated-assets"],
     queryFn: () => callAutoEval("assets"),
     refetchInterval: 60_000,
+  });
+}
+
+/**
+ * Auto-evaluation tick hook. Refetch interval is driven by the
+ * current eval cadence setting (1m / 5m / 10m / 20m / 1h).
+ */
+export function useAutoEvalTick(enabled: boolean, cadenceKey: string) {
+  const intervalMs = CADENCE_MS[getEvalCadence()];
+  return useQuery({
+    queryKey: ["auto-eval-tick", cadenceKey],
+    queryFn: () => callAutoEval("tick"),
+    enabled,
+    refetchInterval: intervalMs,
+    refetchIntervalInBackground: false,
   });
 }
