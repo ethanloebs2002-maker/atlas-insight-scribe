@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import {
-  Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle,
+  Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, Activity,
   CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft, BarChart3,
   Sparkles, Search, ShieldAlert, Scan, Timer, Gauge, MoreHorizontal,
 } from "lucide-react";
@@ -32,6 +32,7 @@ import BestTimeframeBadge from "@/components/BestTimeframeBadge";
 import TimeframePerformancePanel from "@/components/TimeframePerformancePanel";
 import DetailPanel, { type SelectedItem } from "@/components/paper-trades/DetailPanel";
 import EngineTimeline from "@/components/paper-trades/EngineTimeline";
+import EngineDiagnostics from "@/components/paper-trades/EngineDiagnostics";
 import { useIncorporatedAssets, runAutoEvalTick } from "@/hooks/use-auto-eval";
 import { type EvalCadence, CADENCE_OPTIONS } from "@/lib/eval-cadence";
 import { useAutoEvaluationScheduler } from "@/hooks/use-auto-eval-scheduler";
@@ -207,6 +208,7 @@ export default function PaperTrades() {
               <TabsTrigger value="anomalies" className="text-[10px] gap-1"><Scan className="h-3 w-3" />Anomalies</TabsTrigger>
               <TabsTrigger value="tf-performance" className="text-[10px] gap-1"><Timer className="h-3 w-3" />TF Perf</TabsTrigger>
               <TabsTrigger value="engine-events" className="text-[10px] gap-1"><Zap className="h-3 w-3" />Events</TabsTrigger>
+              <TabsTrigger value="diagnostics" className="text-[10px] gap-1"><Activity className="h-3 w-3" />Diagnostics</TabsTrigger>
             </TabsList>
           </div>
 
@@ -528,6 +530,7 @@ export default function PaperTrades() {
           <TabsContent value="anomalies" className="mt-3"><AnomalyPanel selectedAsset={selectedAsset} /></TabsContent>
           <TabsContent value="tf-performance" className="mt-3"><TimeframePerformancePanel asset={selectedAsset} /></TabsContent>
           <TabsContent value="engine-events" className="mt-3"><EngineTimeline events={engineEvents} /></TabsContent>
+          <TabsContent value="diagnostics" className="mt-3"><EngineDiagnostics /></TabsContent>
         </Tabs>
       </div>
 
