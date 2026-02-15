@@ -8,8 +8,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft } from "lucide-react";
+import { Play, Pause, Download, Shield, Target, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Minus, Zap, Clock, ArrowRightLeft, BarChart3, Sparkles, Search } from "lucide-react";
 import LearningSourcesPanel from "@/components/LearningSourcesPanel";
+import IndicatorBreakdownPanel from "@/components/IndicatorBreakdownPanel";
+import IndicatorReliabilityPanel from "@/components/IndicatorReliabilityPanel";
+import IndicatorPatternsPanel from "@/components/IndicatorPatternsPanel";
 
 const ASSETS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
 
@@ -108,6 +111,18 @@ export default function PaperTrades() {
           <TabsTrigger value="transfer" className="text-xs gap-1">
             <ArrowRightLeft className="h-3 w-3" />
             Transfer Learning
+          </TabsTrigger>
+          <TabsTrigger value="indicator-breakdown" className="text-xs gap-1">
+            <Search className="h-3 w-3" />
+            Indicator Breakdown
+          </TabsTrigger>
+          <TabsTrigger value="reliability" className="text-xs gap-1">
+            <BarChart3 className="h-3 w-3" />
+            Reliability
+          </TabsTrigger>
+          <TabsTrigger value="patterns" className="text-xs gap-1">
+            <Sparkles className="h-3 w-3" />
+            Patterns
           </TabsTrigger>
         </TabsList>
 
@@ -439,6 +454,21 @@ export default function PaperTrades() {
         {/* ─── TRANSFER LEARNING ───────────────────────────── */}
         <TabsContent value="transfer">
           <LearningSourcesPanel selectedAsset={selectedAsset} />
+        </TabsContent>
+
+        {/* ─── INDICATOR BREAKDOWN (per-trade) ─────────────── */}
+        <TabsContent value="indicator-breakdown">
+          <IndicatorBreakdownPanel decisions={decisions} />
+        </TabsContent>
+
+        {/* ─── INDICATOR RELIABILITY ───────────────────────── */}
+        <TabsContent value="reliability">
+          <IndicatorReliabilityPanel selectedAsset={selectedAsset} />
+        </TabsContent>
+
+        {/* ─── PATTERNS ────────────────────────────────────── */}
+        <TabsContent value="patterns">
+          <IndicatorPatternsPanel selectedAsset={selectedAsset} />
         </TabsContent>
       </Tabs>
     </div>
