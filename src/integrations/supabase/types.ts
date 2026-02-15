@@ -650,7 +650,7 @@ export type Database = {
             foreignKeyName: "indicator_outcome_links_trade_id_fkey"
             columns: ["trade_id"]
             isOneToOne: false
-            referencedRelation: "paper_trades"
+            referencedRelation: "paper_trades_legacy"
             referencedColumns: ["id"]
           },
         ]
@@ -1445,6 +1445,7 @@ export type Database = {
           consensus_score: number
           correct: boolean | null
           created_at: string
+          decision_type: string | null
           direction_pred: string
           emit_run_id: string | null
           emitted_at: string | null
@@ -1462,6 +1463,7 @@ export type Database = {
           ref_price: number
           timeframe: string
           ts: string
+          version_tag: string | null
         }
         Insert: {
           agreement_score?: number
@@ -1470,6 +1472,7 @@ export type Database = {
           consensus_score?: number
           correct?: boolean | null
           created_at?: string
+          decision_type?: string | null
           direction_pred: string
           emit_run_id?: string | null
           emitted_at?: string | null
@@ -1487,6 +1490,7 @@ export type Database = {
           ref_price: number
           timeframe?: string
           ts?: string
+          version_tag?: string | null
         }
         Update: {
           agreement_score?: number
@@ -1495,6 +1499,7 @@ export type Database = {
           consensus_score?: number
           correct?: boolean | null
           created_at?: string
+          decision_type?: string | null
           direction_pred?: string
           emit_run_id?: string | null
           emitted_at?: string | null
@@ -1512,10 +1517,392 @@ export type Database = {
           ref_price?: number
           timeframe?: string
           ts?: string
+          version_tag?: string | null
         }
         Relationships: []
       }
-      paper_trades: {
+      paper_engine_events: {
+        Row: {
+          entity_id: string | null
+          entity_type: string
+          event_type: string
+          id: string
+          payload: Json
+          run_id: string | null
+          ts: string
+          version_tag: string | null
+        }
+        Insert: {
+          entity_id?: string | null
+          entity_type: string
+          event_type: string
+          id?: string
+          payload?: Json
+          run_id?: string | null
+          ts?: string
+          version_tag?: string | null
+        }
+        Update: {
+          entity_id?: string | null
+          entity_type?: string
+          event_type?: string
+          id?: string
+          payload?: Json
+          run_id?: string | null
+          ts?: string
+          version_tag?: string | null
+        }
+        Relationships: []
+      }
+      paper_fills: {
+        Row: {
+          fee_paid: number
+          fill_price: number
+          filled_qty: number
+          id: string
+          meta: Json
+          order_id: string
+          position_id: string | null
+          slippage_paid: number
+          ts: string
+        }
+        Insert: {
+          fee_paid?: number
+          fill_price: number
+          filled_qty?: number
+          id?: string
+          meta?: Json
+          order_id: string
+          position_id?: string | null
+          slippage_paid?: number
+          ts?: string
+        }
+        Update: {
+          fee_paid?: number
+          fill_price?: number
+          filled_qty?: number
+          id?: string
+          meta?: Json
+          order_id?: string
+          position_id?: string | null
+          slippage_paid?: number
+          ts?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_fills_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "paper_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      paper_orders: {
+        Row: {
+          avg_fill_price: number | null
+          created_at: string
+          eligible_fill_at: string
+          filled_qty: number
+          id: string
+          limit_price: number | null
+          meta: Json
+          oco_group_id: string | null
+          order_type: string
+          placed_at: string
+          policy_id: string | null
+          position_id: string | null
+          qty: number
+          reduce_only: boolean
+          run_id: string | null
+          side: string
+          status: string
+          stop_price: number | null
+          symbol: string
+          tif: string
+          updated_at: string
+        }
+        Insert: {
+          avg_fill_price?: number | null
+          created_at?: string
+          eligible_fill_at?: string
+          filled_qty?: number
+          id?: string
+          limit_price?: number | null
+          meta?: Json
+          oco_group_id?: string | null
+          order_type: string
+          placed_at?: string
+          policy_id?: string | null
+          position_id?: string | null
+          qty?: number
+          reduce_only?: boolean
+          run_id?: string | null
+          side: string
+          status?: string
+          stop_price?: number | null
+          symbol: string
+          tif?: string
+          updated_at?: string
+        }
+        Update: {
+          avg_fill_price?: number | null
+          created_at?: string
+          eligible_fill_at?: string
+          filled_qty?: number
+          id?: string
+          limit_price?: number | null
+          meta?: Json
+          oco_group_id?: string | null
+          order_type?: string
+          placed_at?: string
+          policy_id?: string | null
+          position_id?: string | null
+          qty?: number
+          reduce_only?: boolean
+          run_id?: string | null
+          side?: string
+          status?: string
+          stop_price?: number | null
+          symbol?: string
+          tif?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_orders_policy_id_fkey"
+            columns: ["policy_id"]
+            isOneToOne: false
+            referencedRelation: "paper_policy"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_orders_policy_id_fkey"
+            columns: ["policy_id"]
+            isOneToOne: false
+            referencedRelation: "v_active_paper_policy"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      paper_policy: {
+        Row: {
+          allow_shorts: boolean
+          created_at: string
+          expiry_minutes_by_tf: Json
+          fee_bps: number
+          fill_fraction_max: number
+          fill_fraction_min: number
+          id: string
+          is_active: boolean
+          latency_ms: number
+          max_open: number
+          max_pending: number
+          min_prob: number
+          min_rr: number
+          notes: string | null
+          require_ev_positive: boolean
+          slippage_bps: number
+          updated_at: string
+          version_tag: string
+          worst_case_same_candle: boolean
+        }
+        Insert: {
+          allow_shorts?: boolean
+          created_at?: string
+          expiry_minutes_by_tf?: Json
+          fee_bps?: number
+          fill_fraction_max?: number
+          fill_fraction_min?: number
+          id?: string
+          is_active?: boolean
+          latency_ms?: number
+          max_open?: number
+          max_pending?: number
+          min_prob?: number
+          min_rr?: number
+          notes?: string | null
+          require_ev_positive?: boolean
+          slippage_bps?: number
+          updated_at?: string
+          version_tag?: string
+          worst_case_same_candle?: boolean
+        }
+        Update: {
+          allow_shorts?: boolean
+          created_at?: string
+          expiry_minutes_by_tf?: Json
+          fee_bps?: number
+          fill_fraction_max?: number
+          fill_fraction_min?: number
+          id?: string
+          is_active?: boolean
+          latency_ms?: number
+          max_open?: number
+          max_pending?: number
+          min_prob?: number
+          min_rr?: number
+          notes?: string | null
+          require_ev_positive?: boolean
+          slippage_bps?: number
+          updated_at?: string
+          version_tag?: string
+          worst_case_same_candle?: boolean
+        }
+        Relationships: []
+      }
+      paper_positions: {
+        Row: {
+          close_reason: string | null
+          closed_at: string | null
+          created_at: string
+          decision_id: string | null
+          duplicate_key: string | null
+          eligible_close_at: string | null
+          entry_order_id: string | null
+          entry_price: number | null
+          exit_price: number | null
+          expires_at: string | null
+          filled_at: string | null
+          horizon: string
+          id: string
+          initial_probability_pred: number | null
+          initial_probability_source: string | null
+          meta: Json
+          outcome_label: string | null
+          policy_id: string | null
+          qty: number
+          realized_pct: number | null
+          realized_pnl: number | null
+          realized_r: number | null
+          regime_label: string | null
+          run_id: string | null
+          side: string
+          sl_order_id: string | null
+          status: string
+          stop_price: number | null
+          symbol: string
+          timeframe: string
+          tp_order_id: string | null
+          tp_price: number | null
+          updated_at: string
+        }
+        Insert: {
+          close_reason?: string | null
+          closed_at?: string | null
+          created_at?: string
+          decision_id?: string | null
+          duplicate_key?: string | null
+          eligible_close_at?: string | null
+          entry_order_id?: string | null
+          entry_price?: number | null
+          exit_price?: number | null
+          expires_at?: string | null
+          filled_at?: string | null
+          horizon?: string
+          id?: string
+          initial_probability_pred?: number | null
+          initial_probability_source?: string | null
+          meta?: Json
+          outcome_label?: string | null
+          policy_id?: string | null
+          qty?: number
+          realized_pct?: number | null
+          realized_pnl?: number | null
+          realized_r?: number | null
+          regime_label?: string | null
+          run_id?: string | null
+          side: string
+          sl_order_id?: string | null
+          status?: string
+          stop_price?: number | null
+          symbol: string
+          timeframe?: string
+          tp_order_id?: string | null
+          tp_price?: number | null
+          updated_at?: string
+        }
+        Update: {
+          close_reason?: string | null
+          closed_at?: string | null
+          created_at?: string
+          decision_id?: string | null
+          duplicate_key?: string | null
+          eligible_close_at?: string | null
+          entry_order_id?: string | null
+          entry_price?: number | null
+          exit_price?: number | null
+          expires_at?: string | null
+          filled_at?: string | null
+          horizon?: string
+          id?: string
+          initial_probability_pred?: number | null
+          initial_probability_source?: string | null
+          meta?: Json
+          outcome_label?: string | null
+          policy_id?: string | null
+          qty?: number
+          realized_pct?: number | null
+          realized_pnl?: number | null
+          realized_r?: number | null
+          regime_label?: string | null
+          run_id?: string | null
+          side?: string
+          sl_order_id?: string | null
+          status?: string
+          stop_price?: number | null
+          symbol?: string
+          timeframe?: string
+          tp_order_id?: string | null
+          tp_price?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_positions_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_entry_order_id_fkey"
+            columns: ["entry_order_id"]
+            isOneToOne: false
+            referencedRelation: "paper_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_policy_id_fkey"
+            columns: ["policy_id"]
+            isOneToOne: false
+            referencedRelation: "paper_policy"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_policy_id_fkey"
+            columns: ["policy_id"]
+            isOneToOne: false
+            referencedRelation: "v_active_paper_policy"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_sl_order_id_fkey"
+            columns: ["sl_order_id"]
+            isOneToOne: false
+            referencedRelation: "paper_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_tp_order_id_fkey"
+            columns: ["tp_order_id"]
+            isOneToOne: false
+            referencedRelation: "paper_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      paper_trades_legacy: {
         Row: {
           asset_id: string
           close_reason: string | null
@@ -1740,6 +2127,42 @@ export type Database = {
           },
         ]
       }
+      price_candles: {
+        Row: {
+          close: number
+          high: number
+          id: string
+          low: number
+          open: number
+          symbol: string
+          timeframe: string
+          ts: string
+          volume: number | null
+        }
+        Insert: {
+          close: number
+          high: number
+          id?: string
+          low: number
+          open: number
+          symbol: string
+          timeframe: string
+          ts: string
+          volume?: number | null
+        }
+        Update: {
+          close?: number
+          high?: number
+          id?: string
+          low?: number
+          open?: number
+          symbol?: string
+          timeframe?: string
+          ts?: string
+          volume?: number | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -1934,7 +2357,72 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      paper_trades: {
+        Row: {
+          asset_id: string | null
+          close_reason: string | null
+          created_at: string | null
+          decision_id: string | null
+          duplicate_key: string | null
+          entry_zone_high: number | null
+          entry_zone_low: number | null
+          evidence_snapshot_json: Json | null
+          exit_price: number | null
+          fill_price: number | null
+          id: string | null
+          initial_probability_pred: number | null
+          initial_probability_source: string | null
+          mae_r: number | null
+          mfe_r: number | null
+          outcome_label: string | null
+          regime_label: string | null
+          return_pct: number | null
+          return_r: number | null
+          scenario_type: string | null
+          status: string | null
+          stop_level: number | null
+          stop_rule: string | null
+          targets_json: Json | null
+          time_window_end: string | null
+          timeframe: string | null
+          trigger_rule: string | null
+          ts_closed: string | null
+          ts_created: string | null
+          ts_opened: string | null
+        }
+        Relationships: []
+      }
+      v_active_paper_policy: {
+        Row: {
+          allow_shorts: boolean | null
+          created_at: string | null
+          expiry_minutes_by_tf: Json | null
+          fee_bps: number | null
+          fill_fraction_max: number | null
+          fill_fraction_min: number | null
+          id: string | null
+          is_active: boolean | null
+          latency_ms: number | null
+          max_open: number | null
+          max_pending: number | null
+          min_prob: number | null
+          min_rr: number | null
+          notes: string | null
+          require_ev_positive: boolean | null
+          slippage_bps: number | null
+          updated_at: string | null
+          version_tag: string | null
+          worst_case_same_candle: boolean | null
+        }
+        Relationships: []
+      }
+      v_paper_exposure: {
+        Row: {
+          open_positions: number | null
+          pending_positions: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       compute_transfer_decay: {

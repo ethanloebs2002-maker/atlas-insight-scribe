@@ -45,19 +45,27 @@ export function useRecordDecision() {
   });
 }
 
-export function useRecordTrade() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: any) => callPaperEngine("record-trade", {}, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["paper-stats"] }),
-  });
-}
-
 export function useEvaluate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ asset, horizon }: { asset: string; horizon?: string }) =>
       callPaperEngine("evaluate", { asset, ...(horizon ? { horizon } : {}), emitted_by: "MANUAL_EVALUATE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["paper-stats"] }),
+  });
+}
+
+export function usePaperEvents(entityId?: string) {
+  return useQuery({
+    queryKey: ["paper-events", entityId],
+    queryFn: () => callPaperEngine("events", entityId ? { entity_id: entityId } : {}),
+    refetchInterval: 30_000,
+  });
+}
+
+export function usePaperPolicy() {
+  return useQuery({
+    queryKey: ["paper-policy"],
+    queryFn: () => callPaperEngine("policy"),
+    refetchInterval: 60_000,
   });
 }
