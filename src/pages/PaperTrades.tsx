@@ -44,6 +44,7 @@ export default function PaperTrades() {
   const openTrades = trades.filter((t: any) => t.status === "OPEN");
   const closedTrades = trades.filter((t: any) => t.status === "CLOSED");
   const pendingTrades = trades.filter((t: any) => t.status === "PENDING");
+  console.log("pending count", pendingTrades.length);
 
   const evaluatedDecisions = decisions.filter((d: any) => d.evaluated_at);
   const correctDecisions = evaluatedDecisions.filter((d: any) => d.correct);
