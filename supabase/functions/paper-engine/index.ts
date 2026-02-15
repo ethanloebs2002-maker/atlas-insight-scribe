@@ -219,6 +219,25 @@ async function checkCadenceGuard(emittedBy: string): Promise<{ allowed: boolean;
   return { allowed: true };
 }
 
+// ─── PROBABILITY CLAMPING ────────────────────────────────────────
+function clampProbability(raw: unknown, source: string): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw as number)) {
+    console.warn(`[clampProbability] Non-finite from ${source}, defaulting to 0.5`);
+    return 0.5;
+  }
+  let v = raw as number;
+  // Auto-normalize percent-scale values (1–100] → [0.01–1]
+  if (v > 1 && v <= 100) {
+    console.warn(`[clampProbability] Auto-normalizing ${v} from ${source} (assumed %)`);
+    v = v / 100;
+  }
+  if (v < 0 || v > 1) {
+    console.error(`[clampProbability] Out of range from ${source}: ${v}, clamping`);
+    v = Math.max(0, Math.min(1, v));
+  }
+  return v;
+}
+
 // ─── STUCK PROBABILITY DETECTION ─────────────────────────────────
 async function checkStuckProbability(assetId: string, currentProb: number) {
   try {
@@ -334,7 +353,7 @@ async function emitDecision(
     else if (best.type === "bearish") direction = "DOWN";
 
     const rawProbability = best.probability;
-    const probability = (typeof rawProbability === "number" && Number.isFinite(rawProbability)) ? rawProbability : 0.5;
+    const probability = clampProbability(rawProbability, "indicator-engine");
     const confidence = Math.round(probability * 100);
 
     // Stuck probability detection
