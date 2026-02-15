@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, ReferenceLine, ReferenceArea, Customized,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -43,6 +44,7 @@ interface AdvancedChartProps {
   targets?: { price: number; label: string }[];
   timeframe?: string;
   onTimeframeChange?: (tf: string) => void;
+  isLoading?: boolean;
 }
 
 // ─── TIMEFRAME CONFIG ───────────────────────────────────────────
@@ -221,7 +223,7 @@ function CandlesLayer(props: any) {
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────
-export default function AdvancedChart({ data, symbol, entryZones, stopLevel, targets, timeframe: controlledTf, onTimeframeChange }: AdvancedChartProps) {
+export default function AdvancedChart({ data, symbol, entryZones, stopLevel, targets, timeframe: controlledTf, onTimeframeChange, isLoading }: AdvancedChartProps) {
   const [visibleCount, setVisibleCount] = useState(40);
   const [internalTf, setInternalTf] = useState('4h');
   const timeframe = controlledTf ?? internalTf;
@@ -331,7 +333,15 @@ export default function AdvancedChart({ data, symbol, entryZones, stopLevel, tar
           </div>
         </div>
       </CardHeader>
-      <CardContent className="p-0 pr-2 pb-2 space-y-0">
+      <CardContent className="p-0 pr-2 pb-2 space-y-0 relative">
+        {isLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-card/70 backdrop-blur-[2px] rounded-b-lg">
+            <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              Loading {timeframe} data…
+            </div>
+          </div>
+        )}
         {/* Main price chart */}
         <ResponsiveContainer width="100%" height={mainChartHeight}>
           <ComposedChart data={visibleData} margin={{ top: 8, right: 8, bottom: 0, left: 4 }}>
