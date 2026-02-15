@@ -28,6 +28,15 @@ export function useSystemStatus(asset?: string) {
   });
 }
 
+export function useRTTimeline(asset?: string) {
+  return useQuery({
+    queryKey: ["rt-timeline", asset],
+    queryFn: () => callSafetyEngine("rt-timeline", asset ? { asset, limit: "30" } : { limit: "30" }),
+    enabled: !!asset,
+    refetchInterval: 30_000,
+  });
+}
+
 export function useAnomalyHistory(asset?: string) {
   return useQuery({
     queryKey: ["anomaly-history", asset],
@@ -41,6 +50,18 @@ export function usePatternTiers(asset?: string) {
     queryKey: ["pattern-tiers", asset],
     queryFn: () => callSafetyEngine("pattern-tiers", asset ? { asset } : {}),
     refetchInterval: 30_000,
+  });
+}
+
+export function useRunRTSense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (asset: string) => callSafetyEngine("rt-sense", { asset }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["system-status"] });
+      qc.invalidateQueries({ queryKey: ["rt-timeline"] });
+      qc.invalidateQueries({ queryKey: ["anomaly-history"] });
+    },
   });
 }
 

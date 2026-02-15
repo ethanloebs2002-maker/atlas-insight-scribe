@@ -95,6 +95,87 @@ export type Database = {
         }
         Relationships: []
       }
+      anomaly_rt_samples: {
+        Row: {
+          anomaly_score: number
+          asset_id: string
+          created_at: string
+          id: string
+          metrics_json: Json | null
+          proposed_state: string
+          root_causes_json: Json
+        }
+        Insert: {
+          anomaly_score?: number
+          asset_id?: string
+          created_at?: string
+          id?: string
+          metrics_json?: Json | null
+          proposed_state?: string
+          root_causes_json?: Json
+        }
+        Update: {
+          anomaly_score?: number
+          asset_id?: string
+          created_at?: string
+          id?: string
+          metrics_json?: Json | null
+          proposed_state?: string
+          root_causes_json?: Json
+        }
+        Relationships: []
+      }
+      anomaly_stable_state: {
+        Row: {
+          asset_id: string
+          consecutive_halt: number
+          consecutive_normal: number
+          consecutive_warn: number
+          cooldown_reason: string | null
+          cooldown_until: string | null
+          created_at: string
+          id: string
+          last_transition_at: string
+          policy_adjustments_json: Json
+          root_causes_json: Json
+          stable_score: number
+          stable_state: string
+          updated_at: string
+        }
+        Insert: {
+          asset_id: string
+          consecutive_halt?: number
+          consecutive_normal?: number
+          consecutive_warn?: number
+          cooldown_reason?: string | null
+          cooldown_until?: string | null
+          created_at?: string
+          id?: string
+          last_transition_at?: string
+          policy_adjustments_json?: Json
+          root_causes_json?: Json
+          stable_score?: number
+          stable_state?: string
+          updated_at?: string
+        }
+        Update: {
+          asset_id?: string
+          consecutive_halt?: number
+          consecutive_normal?: number
+          consecutive_warn?: number
+          cooldown_reason?: string | null
+          cooldown_until?: string | null
+          created_at?: string
+          id?: string
+          last_transition_at?: string
+          policy_adjustments_json?: Json
+          root_causes_json?: Json
+          stable_score?: number
+          stable_state?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       asset_fingerprints: {
         Row: {
           asset_id: string
