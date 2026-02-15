@@ -1,4 +1,7 @@
+import { assertDemoOnly } from '@/lib/run-mode';
 import type { AssetOverview, ScenarioData, ConsensusData, WhaleEntry, EvidenceRow } from '@/types/atlas';
+
+assertDemoOnly("mockData");
 import { asProbability } from '@/types/probability';
 
 const btcEvidence: EvidenceRow[] = [
