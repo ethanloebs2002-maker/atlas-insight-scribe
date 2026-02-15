@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Activity, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
 import { useMarketData } from '@/hooks/use-crypto-data';
-import { mockAssets } from '@/data/mockData';
 import { formatPrice, formatLargeNumber } from '@/lib/atlas-utils';
 import { cn } from '@/lib/utils';
 import type { AssetOverview } from '@/types/atlas';
@@ -12,7 +11,7 @@ export default function AssetSearch() {
   const navigate = useNavigate();
   const { data: liveAssets, isLoading, isError } = useMarketData();
 
-  const assets: AssetOverview[] = liveAssets && liveAssets.length > 0 ? liveAssets : mockAssets;
+  const assets: AssetOverview[] = liveAssets && liveAssets.length > 0 ? liveAssets : [];
 
   const filtered = assets.filter(a =>
     a.symbol.toLowerCase().includes(query.toLowerCase()) ||
@@ -31,7 +30,7 @@ export default function AssetSearch() {
           Crypto Market Intelligence & Decision Support Engine
         </p>
         <p className="text-[10px] text-muted-foreground font-mono mt-1">
-          {isLoading ? 'Loading live data…' : isError ? 'Using cached data • API unavailable' : 'Live data • CoinGecko + Binance'}
+          {isLoading ? 'Loading live data…' : isError ? 'API unavailable — no data to display' : 'Live data • CoinGecko + Binance'}
         </p>
       </div>
 
@@ -55,6 +54,13 @@ export default function AssetSearch() {
         <div className="flex items-center gap-2 text-muted-foreground text-xs font-mono mb-4">
           <Loader2 className="h-4 w-4 animate-spin" />
           Fetching live market data…
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!isLoading && filtered.length === 0 && (
+        <div className="text-xs font-mono text-muted-foreground py-8">
+          {assets.length === 0 ? 'No market data available. Run an evaluation to populate assets.' : 'No matching assets found.'}
         </div>
       )}
 

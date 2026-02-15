@@ -1,4 +1,3 @@
-import { mockWhales } from '@/data/mockData';
 import WhaleTable from '@/components/WhaleTable';
 import { Anchor } from 'lucide-react';
 
@@ -12,7 +11,11 @@ export default function WhaleWatch() {
           <p className="text-xs text-muted-foreground font-mono">Track historically successful large participants</p>
         </div>
       </div>
-      <WhaleTable whales={mockWhales} />
+
+      <div className="rounded-lg border border-border bg-card/50 p-6 text-center">
+        <p className="text-xs font-mono text-muted-foreground">No whale data available. Run an evaluation to populate whale tracking.</p>
+      </div>
+
       <div className="rounded-lg border border-border bg-card/50 p-3">
         <p className="text-[10px] font-mono text-muted-foreground">
           Whale tracking uses on-chain inference. Wallet labels are community-sourced and may be incorrect.

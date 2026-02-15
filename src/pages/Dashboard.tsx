@@ -1,16 +1,34 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAssetAnalysis } from '@/hooks/use-crypto-data';
-import { mockAsset, mockScenarios, mockConsensus, mockWhales } from '@/data/mockData';
 import AssetHeader from '@/components/AssetHeader';
 import ScenarioCard from '@/components/ScenarioCard';
 import ConsensusReport from '@/components/ConsensusReport';
 import EvidenceTable from '@/components/EvidenceTable';
-import WhaleTable from '@/components/WhaleTable';
 import AdvancedChart from '@/components/AdvancedChart';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
 import { Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import type { AssetOverview, ScenarioData, ConsensusData } from '@/types/atlas';
+
+const emptyAsset: AssetOverview = {
+  symbol: '---',
+  name: 'Loading…',
+  price: 0,
+  change24h: 0,
+  volume24h: 0,
+  marketCap: 0,
+  regime: 'Ranging',
+};
+
+const emptyConsensus: ConsensusData = {
+  score: 0,
+  conflicts: [],
+  sourceAgreement: 0,
+  signalAgreement: 0,
+  structureAgreement: 0,
+  dataCompleteness: 0,
+};
 
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
@@ -18,10 +36,10 @@ export default function Dashboard() {
   const [timeframe, setTimeframe] = useState('4h');
   const { data: analysis, isLoading, isError } = useAssetAnalysis(symbol, timeframe);
 
-  const asset = analysis?.asset || mockAsset;
-  const scenarios = analysis?.scenarios || mockScenarios;
-  const consensus = analysis?.consensus || mockConsensus;
-  const bullScenario = scenarios.find(s => s.type === 'bullish')!;
+  const asset = analysis?.asset || emptyAsset;
+  const scenarios: ScenarioData[] = analysis?.scenarios || [];
+  const consensus = analysis?.consensus || emptyConsensus;
+  const bullScenario = scenarios.find(s => s.type === 'bullish');
 
   return (
     <div className="space-y-6">
@@ -43,7 +61,7 @@ export default function Dashboard() {
         )}
         {isError && (
           <div className="text-[10px] font-mono text-bearish">
-            ● OFFLINE — Using cached data
+            ● OFFLINE — No data available
           </div>
         )}
       </div>
@@ -76,16 +94,18 @@ export default function Dashboard() {
           )}
 
           {/* Scenarios */}
-          <section>
-            <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground mb-3">
-              Scenario Analysis
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {scenarios.map(s => (
-                <ScenarioCard key={s.type} scenario={s} />
-              ))}
-            </div>
-          </section>
+          {scenarios.length > 0 && (
+            <section>
+              <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground mb-3">
+                Scenario Analysis
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {scenarios.map(s => (
+                  <ScenarioCard key={s.type} scenario={s} />
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Consensus + Evidence */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -93,12 +113,9 @@ export default function Dashboard() {
               <ConsensusReport data={consensus} />
             </div>
             <div className="lg:col-span-2">
-              <EvidenceTable evidence={bullScenario.evidence} />
+              {bullScenario && <EvidenceTable evidence={bullScenario.evidence} />}
             </div>
           </div>
-
-          {/* Whale Watch */}
-          <WhaleTable whales={mockWhales} />
 
           {/* Disclaimer */}
           <div className="rounded-lg border border-border bg-card/50 p-3">
