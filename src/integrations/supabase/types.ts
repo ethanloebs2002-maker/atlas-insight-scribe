@@ -1450,6 +1450,8 @@ export type Database = {
           emit_run_id: string | null
           emitted_at: string | null
           emitted_by: string
+          engine_status: string
+          entry_price: number | null
           evaluated_at: string | null
           evidence_snapshot_json: Json | null
           horizon: string
@@ -1461,6 +1463,8 @@ export type Database = {
           realized_dir: string | null
           realized_move_pct: number | null
           ref_price: number
+          stop_loss: number | null
+          take_profit: number | null
           timeframe: string
           ts: string
           version_tag: string | null
@@ -1477,6 +1481,8 @@ export type Database = {
           emit_run_id?: string | null
           emitted_at?: string | null
           emitted_by?: string
+          engine_status?: string
+          entry_price?: number | null
           evaluated_at?: string | null
           evidence_snapshot_json?: Json | null
           horizon?: string
@@ -1488,6 +1494,8 @@ export type Database = {
           realized_dir?: string | null
           realized_move_pct?: number | null
           ref_price: number
+          stop_loss?: number | null
+          take_profit?: number | null
           timeframe?: string
           ts?: string
           version_tag?: string | null
@@ -1504,6 +1512,8 @@ export type Database = {
           emit_run_id?: string | null
           emitted_at?: string | null
           emitted_by?: string
+          engine_status?: string
+          entry_price?: number | null
           evaluated_at?: string | null
           evidence_snapshot_json?: Json | null
           horizon?: string
@@ -1515,6 +1525,8 @@ export type Database = {
           realized_dir?: string | null
           realized_move_pct?: number | null
           ref_price?: number
+          stop_loss?: number | null
+          take_profit?: number | null
           timeframe?: string
           ts?: string
           version_tag?: string | null
