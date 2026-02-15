@@ -119,6 +119,203 @@ export type Database = {
         }
         Relationships: []
       }
+      indicator_outcome_links: {
+        Row: {
+          created_at: string
+          decision_id: string
+          direction_correct: number
+          horizon_realized_dir: string | null
+          id: string
+          mae_r: number | null
+          mfe_r: number | null
+          outcome_label: string | null
+          return_r: number | null
+          trade_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          decision_id: string
+          direction_correct?: number
+          horizon_realized_dir?: string | null
+          id?: string
+          mae_r?: number | null
+          mfe_r?: number | null
+          outcome_label?: string | null
+          return_r?: number | null
+          trade_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          decision_id?: string
+          direction_correct?: number
+          horizon_realized_dir?: string | null
+          id?: string
+          mae_r?: number | null
+          mfe_r?: number | null
+          outcome_label?: string | null
+          return_r?: number | null
+          trade_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "indicator_outcome_links_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "indicator_outcome_links_trade_id_fkey"
+            columns: ["trade_id"]
+            isOneToOne: false
+            referencedRelation: "paper_trades"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      indicator_patterns: {
+        Row: {
+          asset_id: string
+          conditions_json: Json
+          confidence_tier: string
+          created_at: string
+          diracc_uplift: number
+          ev_uplift: number
+          id: string
+          is_active: boolean
+          last_validated_ts: string
+          regime_label: string
+          stability_score: number
+          support_n_decisions: number
+          support_n_trades: number
+          timeframe: string
+        }
+        Insert: {
+          asset_id?: string
+          conditions_json?: Json
+          confidence_tier?: string
+          created_at?: string
+          diracc_uplift?: number
+          ev_uplift?: number
+          id?: string
+          is_active?: boolean
+          last_validated_ts?: string
+          regime_label?: string
+          stability_score?: number
+          support_n_decisions?: number
+          support_n_trades?: number
+          timeframe?: string
+        }
+        Update: {
+          asset_id?: string
+          conditions_json?: Json
+          confidence_tier?: string
+          created_at?: string
+          diracc_uplift?: number
+          ev_uplift?: number
+          id?: string
+          is_active?: boolean
+          last_validated_ts?: string
+          regime_label?: string
+          stability_score?: number
+          support_n_decisions?: number
+          support_n_trades?: number
+          timeframe?: string
+        }
+        Relationships: []
+      }
+      indicator_reliability: {
+        Row: {
+          asset_id: string
+          diracc_lift: number
+          ev_lift: number
+          false_positive_rate: number
+          id: string
+          indicator_name: string
+          last_updated_ts: string
+          regime_label: string
+          sample_n: number
+          timeframe: string
+        }
+        Insert: {
+          asset_id: string
+          diracc_lift?: number
+          ev_lift?: number
+          false_positive_rate?: number
+          id?: string
+          indicator_name: string
+          last_updated_ts?: string
+          regime_label?: string
+          sample_n?: number
+          timeframe?: string
+        }
+        Update: {
+          asset_id?: string
+          diracc_lift?: number
+          ev_lift?: number
+          false_positive_rate?: number
+          id?: string
+          indicator_name?: string
+          last_updated_ts?: string
+          regime_label?: string
+          sample_n?: number
+          timeframe?: string
+        }
+        Relationships: []
+      }
+      indicator_snapshots: {
+        Row: {
+          asset_id: string
+          created_at: string
+          decision_id: string
+          engine_outputs_json: Json | null
+          id: string
+          indicators_json: Json
+          integrity_json: Json | null
+          regime_label: string
+          role_scores_json: Json | null
+          timeframe_confirm: string | null
+          timeframe_primary: string
+          ts: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          decision_id: string
+          engine_outputs_json?: Json | null
+          id?: string
+          indicators_json?: Json
+          integrity_json?: Json | null
+          regime_label?: string
+          role_scores_json?: Json | null
+          timeframe_confirm?: string | null
+          timeframe_primary?: string
+          ts?: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          decision_id?: string
+          engine_outputs_json?: Json | null
+          id?: string
+          indicators_json?: Json
+          integrity_json?: Json | null
+          regime_label?: string
+          role_scores_json?: Json | null
+          timeframe_confirm?: string | null
+          timeframe_primary?: string
+          ts?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "indicator_snapshots_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       paper_decisions: {
         Row: {
           agreement_score: number

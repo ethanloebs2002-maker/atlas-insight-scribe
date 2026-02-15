@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.transfer-engine]
 verify_jwt = false
+
+[functions.indicator-engine]
+verify_jwt = false
