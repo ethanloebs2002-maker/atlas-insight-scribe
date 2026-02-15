@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { usePaperStats, useEvaluate } from "@/hooks/use-paper-engine";
+import { usePaperStats } from "@/hooks/use-paper-engine";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import IndicatorPatternsPanel from "@/components/IndicatorPatternsPanel";
 import SystemStatusBanner from "@/components/SystemStatusBanner";
 import PatternTierPanel from "@/components/PatternTierPanel";
 import AnomalyPanel from "@/components/AnomalyPanel";
+import EvaluateButton from "@/components/EvaluateButton";
 
 const ASSETS = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"];
 
@@ -24,7 +25,6 @@ export default function PaperTrades() {
   const [paused, setPaused] = useState(false);
   const [showLearning, setShowLearning] = useState(false);
   const { data: statsRes, isLoading } = usePaperStats(selectedAsset, true);
-  const evaluate = useEvaluate();
 
   const stats = statsRes?.data;
   const decisions = stats?.decisions || [];
@@ -77,14 +77,7 @@ export default function PaperTrades() {
             {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
             {paused ? "Resume" : "Pause"}
           </Button>
-          <Button
-            variant="outline" size="sm" className="h-8 text-xs font-mono gap-1.5"
-            onClick={() => selectedAsset && evaluate.mutate({ asset: selectedAsset })}
-            disabled={!selectedAsset || evaluate.isPending}
-          >
-            <Target className="h-3 w-3" />
-            Evaluate
-          </Button>
+          <EvaluateButton selectedAsset={selectedAsset} />
           <Button variant="ghost" size="sm" className="h-8 text-xs font-mono gap-1.5">
             <Download className="h-3 w-3" />
             Export
