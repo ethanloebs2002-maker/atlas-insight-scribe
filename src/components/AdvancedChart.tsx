@@ -41,6 +41,8 @@ interface AdvancedChartProps {
   entryZones?: { low: number; high: number }[];
   stopLevel?: number;
   targets?: { price: number; label: string }[];
+  timeframe?: string;
+  onTimeframeChange?: (tf: string) => void;
 }
 
 // ─── TIMEFRAME CONFIG ───────────────────────────────────────────
@@ -219,9 +221,11 @@ function CandlesLayer(props: any) {
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────
-export default function AdvancedChart({ data, symbol, entryZones, stopLevel, targets }: AdvancedChartProps) {
+export default function AdvancedChart({ data, symbol, entryZones, stopLevel, targets, timeframe: controlledTf, onTimeframeChange }: AdvancedChartProps) {
   const [visibleCount, setVisibleCount] = useState(40);
-  const [timeframe, setTimeframe] = useState('4h');
+  const [internalTf, setInternalTf] = useState('4h');
+  const timeframe = controlledTf ?? internalTf;
+  const setTimeframe = onTimeframeChange ?? setInternalTf;
   const [showRSI, setShowRSI] = useState(false);
   const [showMACD, setShowMACD] = useState(false);
   const [showBB, setShowBB] = useState(false);

@@ -61,12 +61,26 @@ async function fetchCryptoCompareMarket(symbols: string[]): Promise<MarketData[]
   }
 }
 
-async function fetchCryptoCompareOHLCV(symbol: string, limit: number = 100): Promise<KlineData[]> {
+function getTimeframeConfig(tf: string): { endpoint: string; aggregate: number } {
+  switch (tf) {
+    case '1m':  return { endpoint: 'histominute', aggregate: 1 };
+    case '5m':  return { endpoint: 'histominute', aggregate: 5 };
+    case '15m': return { endpoint: 'histominute', aggregate: 15 };
+    case '1h':  return { endpoint: 'histohour', aggregate: 1 };
+    case '4h':  return { endpoint: 'histohour', aggregate: 4 };
+    case '1d':  return { endpoint: 'histoday', aggregate: 1 };
+    case '1w':  return { endpoint: 'histoday', aggregate: 7 };
+    case '1M':  return { endpoint: 'histoday', aggregate: 30 };
+    default:    return { endpoint: 'histohour', aggregate: 4 };
+  }
+}
+
+async function fetchCryptoCompareOHLCV(symbol: string, limit: number = 100, timeframe: string = '4h'): Promise<KlineData[]> {
   const fsym = symbol.toUpperCase();
   if (!COIN_NAMES[fsym]) return [];
 
-  // histohour with aggregate=4 gives 4h candles
-  const url = `https://min-api.cryptocompare.com/data/v2/histohour?fsym=${fsym}&tsym=USD&limit=${limit}&aggregate=4`;
+  const { endpoint, aggregate } = getTimeframeConfig(timeframe);
+  const url = `https://min-api.cryptocompare.com/data/v2/${endpoint}?fsym=${fsym}&tsym=USD&limit=${limit}&aggregate=${aggregate}`;
   try {
     const res = await fetch(url);
     if (!res.ok) {
@@ -307,9 +321,10 @@ serve(async (req) => {
 
     if (action === "analysis") {
       const symbol = symbols[0];
+      const tf = url.searchParams.get("timeframe") || "4h";
       const [markets, klines] = await Promise.all([
         fetchCryptoCompareMarket([symbol]),
-        fetchCryptoCompareOHLCV(symbol, 100),
+        fetchCryptoCompareOHLCV(symbol, 100, tf),
       ]);
 
       if (!markets.length || !klines.length) {

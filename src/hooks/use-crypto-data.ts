@@ -61,8 +61,8 @@ async function fetchMarketData(symbols: string[]): Promise<AssetOverview[]> {
   }));
 }
 
-async function fetchAnalysis(symbol: string) {
-  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/crypto-data?action=analysis&symbols=${symbol}`;
+async function fetchAnalysis(symbol: string, timeframe: string = '4h') {
+  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/crypto-data?action=analysis&symbols=${symbol}&timeframe=${timeframe}`;
   const res = await fetch(url, {
     headers: {
       'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
@@ -84,12 +84,12 @@ export function useMarketData(symbols: string[] = ['BTC', 'ETH', 'SOL', 'DOGE', 
   });
 }
 
-export function useAssetAnalysis(symbol: string) {
+export function useAssetAnalysis(symbol: string, timeframe: string = '4h') {
   return useQuery({
-    queryKey: ['asset-analysis', symbol],
-    queryFn: () => fetchAnalysis(symbol),
-    refetchInterval: 120_000, // Refresh every 2 minutes
-    staleTime: 60_000,
+    queryKey: ['asset-analysis', symbol, timeframe],
+    queryFn: () => fetchAnalysis(symbol, timeframe),
+    refetchInterval: timeframe === '1m' ? 30_000 : timeframe === '5m' ? 60_000 : 120_000,
+    staleTime: timeframe === '1m' ? 15_000 : timeframe === '5m' ? 30_000 : 60_000,
     enabled: !!symbol,
   });
 }
