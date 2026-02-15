@@ -15,10 +15,12 @@ const callMetaEngine = async (action: string, params: Record<string, string> = {
   return (data as any)?.data ?? data;
 };
 
-// We call the edge function via query params approach
+// We call the edge function with params in body
 const fetchMeta = async (action: string, params: Record<string, string> = {}) => {
-  const qs = new URLSearchParams({ action, ...params }).toString();
-  const { data, error } = await supabase.functions.invoke(`meta-engine?${qs}`);
+  const { data, error } = await supabase.functions.invoke("meta-engine", {
+    body: JSON.stringify({ action, ...params }),
+    headers: { "Content-Type": "application/json" },
+  });
   if (error) throw error;
   return (data as any)?.data ?? data;
 };
