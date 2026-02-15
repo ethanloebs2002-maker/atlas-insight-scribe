@@ -32,6 +32,7 @@ export default function PaperTrades() {
   const [showLearning, setShowLearning] = useState(false);
   const [evalCadence, setEvalCadenceState] = useState<EvalCadence>(getEvalCadence());
   const [expandedDecisionId, setExpandedDecisionId] = useState<string | null>(null);
+  const [expandedTradeId, setExpandedTradeId] = useState<string | null>(null);
 
   // Auto-eval tick driven by cadence
   useAutoEvalTick(!paused && !!selectedAsset, evalCadence);
@@ -209,9 +210,12 @@ export default function PaperTrades() {
                       const stopLoss = evidence.stopLoss?.level
                         ? Number(evidence.stopLoss.level)
                         : entryPrice * (d.direction_pred === "UP" ? 0.97 : 1.03);
-                      const takeProfit = evidence.targets?.[0]?.price
-                        ? Number(evidence.targets[0].price)
-                        : entryPrice * (d.direction_pred === "UP" ? 1.05 : 0.95);
+                      const targetsArr: number[] = Array.isArray(evidence.targets)
+                        ? evidence.targets.map((t: any) => Number(t.price)).filter((n: number) => !isNaN(n) && n > 0)
+                        : [];
+                      if (targetsArr.length === 0) {
+                        targetsArr.push(entryPrice * (d.direction_pred === "UP" ? 1.05 : 0.95));
+                      }
 
                       return (
                         <>
@@ -242,8 +246,9 @@ export default function PaperTrades() {
                                   symbol={d.asset_id}
                                   timeframe={d.timeframe || "4h"}
                                   entry={entryPrice}
+                                  entryLabel="Planned Entry"
                                   stopLoss={stopLoss}
-                                  takeProfit={takeProfit}
+                                  targets={targetsArr}
                                 />
                               </TableCell>
                             </TableRow>
@@ -268,6 +273,7 @@ export default function PaperTrades() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="text-[10px] font-mono w-8"></TableHead>
                     <TableHead className="text-[10px] font-mono">STATUS</TableHead>
                     <TableHead className="text-[10px] font-mono">ASSET</TableHead>
                     <TableHead className="text-[10px] font-mono">TYPE</TableHead>
@@ -280,19 +286,78 @@ export default function PaperTrades() {
                 </TableHeader>
                 <TableBody>
                   {[...openTrades, ...pendingTrades].length === 0 ? (
-                    <TableRow><TableCell colSpan={8} className="text-center text-xs text-muted-foreground py-8 font-mono">No open trades.</TableCell></TableRow>
-                  ) : [...openTrades, ...pendingTrades].map((t: any) => (
-                    <TableRow key={t.id}>
-                      <TableCell><Badge variant={t.status === "OPEN" ? "default" : "secondary"} className="text-[9px] font-mono">{t.status}</Badge></TableCell>
-                      <TableCell className="text-[10px] font-mono font-bold">{t.asset_id}</TableCell>
-                      <TableCell><ScenarioBadge type={t.scenario_type} /></TableCell>
-                      <TableCell className="text-[10px] font-mono">${Number(t.entry_zone_low).toLocaleString()}–${Number(t.entry_zone_high).toLocaleString()}</TableCell>
-                      <TableCell className="text-[10px] font-mono">{t.fill_price ? `$${Number(t.fill_price).toLocaleString()}` : "—"}</TableCell>
-                      <TableCell className="text-[10px] font-mono text-bearish">${Number(t.stop_level).toLocaleString()}</TableCell>
-                      <TableCell className="text-[10px] font-mono">{(t.targets_json || []).length} targets</TableCell>
-                      <TableCell className="text-[10px] font-mono text-muted-foreground">{t.regime_label || "—"}</TableCell>
-                    </TableRow>
-                  ))}
+                    <TableRow><TableCell colSpan={9} className="text-center text-xs text-muted-foreground py-8 font-mono">No open trades.</TableCell></TableRow>
+                  ) : [...openTrades, ...pendingTrades].map((t: any) => {
+                    const isExpanded = expandedTradeId === t.id;
+                    const fillPrice = t.fill_price ? Number(t.fill_price) : null;
+                    const stopLevel = Number(t.stop_level);
+                    const tradeTargets: number[] = Array.isArray(t.targets_json)
+                      ? t.targets_json.map((tp: any) => Number(tp.price ?? tp)).filter((n: number) => !isNaN(n) && n > 0)
+                      : [];
+                    const entryForChart = fillPrice ?? (Number(t.entry_zone_low) + Number(t.entry_zone_high)) / 2;
+
+                    return (
+                      <>
+                        <TableRow key={t.id} className="cursor-pointer hover:bg-secondary/50" onClick={() => setExpandedTradeId(isExpanded ? null : t.id)}>
+                          <TableCell className="px-2">
+                            {isExpanded
+                              ? <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                              : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+                          </TableCell>
+                          <TableCell><Badge variant={t.status === "OPEN" ? "default" : "secondary"} className="text-[9px] font-mono">{t.status}</Badge></TableCell>
+                          <TableCell className="text-[10px] font-mono font-bold">{t.asset_id}</TableCell>
+                          <TableCell><ScenarioBadge type={t.scenario_type} /></TableCell>
+                          <TableCell className="text-[10px] font-mono">${Number(t.entry_zone_low).toLocaleString()}–${Number(t.entry_zone_high).toLocaleString()}</TableCell>
+                          <TableCell className="text-[10px] font-mono">{fillPrice ? `$${fillPrice.toLocaleString()}` : "—"}</TableCell>
+                          <TableCell className="text-[10px] font-mono text-bearish">${stopLevel.toLocaleString()}</TableCell>
+                          <TableCell className="text-[10px] font-mono">{tradeTargets.length} targets</TableCell>
+                          <TableCell className="text-[10px] font-mono text-muted-foreground">{t.regime_label || "—"}</TableCell>
+                        </TableRow>
+                        {isExpanded && (
+                          <TableRow key={`${t.id}-detail`}>
+                            <TableCell colSpan={9} className="p-3 bg-secondary/20 space-y-3">
+                              {/* Trade summary */}
+                              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                <div className="rounded border border-border bg-secondary/40 p-2">
+                                  <div className="text-[9px] font-mono text-muted-foreground uppercase">Fill</div>
+                                  <div className="text-xs font-mono font-bold">{fillPrice ? `$${fillPrice.toLocaleString()}` : "Pending"}</div>
+                                </div>
+                                <div className="rounded border border-border bg-secondary/40 p-2">
+                                  <div className="text-[9px] font-mono text-muted-foreground uppercase">Stop Loss</div>
+                                  <div className="text-xs font-mono font-bold text-bearish">${stopLevel.toLocaleString()}</div>
+                                </div>
+                                {tradeTargets.map((tp, i) => (
+                                  <div key={i} className="rounded border border-border bg-secondary/40 p-2">
+                                    <div className="text-[9px] font-mono text-muted-foreground uppercase">TP{i + 1}</div>
+                                    <div className="text-xs font-mono font-bold text-bullish">${tp.toLocaleString()}</div>
+                                  </div>
+                                ))}
+                                <div className="rounded border border-border bg-secondary/40 p-2">
+                                  <div className="text-[9px] font-mono text-muted-foreground uppercase">Horizon</div>
+                                  <div className="text-xs font-mono font-bold">{t.timeframe}</div>
+                                </div>
+                                {t.time_window_end && (
+                                  <div className="rounded border border-border bg-secondary/40 p-2">
+                                    <div className="text-[9px] font-mono text-muted-foreground uppercase">Expires</div>
+                                    <div className="text-xs font-mono font-bold">{new Date(t.time_window_end).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                                  </div>
+                                )}
+                              </div>
+                              {/* Chart */}
+                              <DecisionChartWithData
+                                symbol={t.asset_id}
+                                timeframe={t.timeframe || "4h"}
+                                entry={entryForChart}
+                                entryLabel={fillPrice ? "Fill" : "Mid Entry"}
+                                stopLoss={stopLevel}
+                                targets={tradeTargets}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </CardContent>
@@ -697,8 +762,8 @@ function GateCard({ label, value, required, pass }: { label: string; value: stri
 }
 
 // ─── DECISION CHART WITH LIVE DATA ──────────────────────────────
-function DecisionChartWithData({ symbol, timeframe, entry, stopLoss, takeProfit }: {
-  symbol: string; timeframe: string; entry: number; stopLoss: number; takeProfit: number;
+function DecisionChartWithData({ symbol, timeframe, entry, entryLabel, stopLoss, targets, takeProfit }: {
+  symbol: string; timeframe: string; entry: number; entryLabel?: string; stopLoss: number; targets?: number[]; takeProfit?: number;
 }) {
   const { data: analysis } = useAssetAnalysis(symbol, timeframe);
   const candles: Candle[] | undefined = analysis?.chartData?.map((c: any) => ({
@@ -714,7 +779,9 @@ function DecisionChartWithData({ symbol, timeframe, entry, stopLoss, takeProfit 
       symbol={symbol}
       timeframe={timeframe}
       entry={entry}
+      entryLabel={entryLabel}
       stopLoss={stopLoss}
+      targets={targets}
       takeProfit={takeProfit}
       candles={candles}
       refPrice={entry}

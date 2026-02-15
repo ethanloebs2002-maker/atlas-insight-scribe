@@ -22,10 +22,13 @@ interface DecisionChartProps {
   symbol: string;
   timeframe: string;
   entry: number;
+  entryLabel?: string;       // default "ENTRY"
   stopLoss: number;
-  takeProfit: number;
+  targets?: number[];        // multiple take-profit levels
   candles?: Candle[];
-  /** @deprecated kept for backwards-compat; ignored when candles provided */
+  /** @deprecated use targets[] instead */
+  takeProfit?: number;
+  /** @deprecated kept for backwards-compat */
   refPrice?: number;
 }
 
@@ -38,17 +41,8 @@ function CandlesLayer(props: any) {
   const yAxis = Object.values(yAxisMap)[0] as any;
   if (!xAxis?.scale || !yAxis?.scale) return null;
 
-  const data: { idx: number; open: number; close: number; high: number; low: number }[] =
-    (props as any).formattedGraphicalItems?.[0]?.props?.data ?? [];
-
-  // Use the actual chart data from the composed chart
-  const chartData = xAxis.categoricalDomain
-    ? (props as any).formattedGraphicalItems?.[0]?.props?.points?.map((_: any, i: number) => i) ?? []
-    : [];
-
   const items = (xAxis.categoricalDomain ?? []).map((_: any, i: number) => {
-    const item = (props as any).formattedGraphicalItems?.[0]?.props?.data?.[i];
-    return item;
+    return (props as any).formattedGraphicalItems?.[0]?.props?.data?.[i];
   });
 
   if (!items.length) return null;
@@ -75,7 +69,7 @@ function CandlesLayer(props: any) {
               y={Math.min(yO, yC)}
               width={bandwidth}
               height={Math.max(1, Math.abs(yC - yO))}
-              fill={bullish ? color : color}
+              fill={color}
               fillOpacity={bullish ? 0.3 : 0.6}
               stroke={color}
               strokeWidth={0.5}
@@ -88,9 +82,9 @@ function CandlesLayer(props: any) {
 }
 
 // ─── Synthetic fallback candle generator ─────────────────────────
-function generateSyntheticCandles(refPrice: number, stopLoss: number, takeProfit: number): Candle[] {
+function generateSyntheticCandles(refPrice: number, stopLoss: number, tpHigh: number): Candle[] {
   const count = 30;
-  const volatility = Math.abs(takeProfit - stopLoss) * 0.02;
+  const volatility = Math.abs(tpHigh - stopLoss) * 0.02;
   const data: Candle[] = [];
   let price = refPrice * 0.998;
   const now = Date.now();
@@ -117,17 +111,27 @@ export default function DecisionChart({
   symbol,
   timeframe,
   entry,
+  entryLabel = "ENTRY",
   stopLoss,
+  targets,
   takeProfit,
   candles: externalCandles,
   refPrice,
 }: DecisionChartProps) {
+  // Resolve target prices: prefer targets[], fall back to single takeProfit
+  const resolvedTargets = useMemo(() => {
+    if (targets && targets.length > 0) return targets;
+    if (takeProfit != null) return [takeProfit];
+    return [];
+  }, [targets, takeProfit]);
+
+  const highestTarget = resolvedTargets.length > 0 ? Math.max(...resolvedTargets) : entry * 1.05;
+
   const candles = useMemo(() => {
     if (externalCandles && externalCandles.length > 0) return externalCandles;
-    return generateSyntheticCandles(refPrice ?? entry, stopLoss, takeProfit);
-  }, [externalCandles, refPrice, entry, stopLoss, takeProfit]);
+    return generateSyntheticCandles(refPrice ?? entry, stopLoss, highestTarget);
+  }, [externalCandles, refPrice, entry, stopLoss, highestTarget]);
 
-  // Map to chart-friendly format with index for x-axis
   const chartData = useMemo(
     () =>
       candles.map((c, i) => ({
@@ -141,23 +145,25 @@ export default function DecisionChart({
     [candles]
   );
 
-  // Compute domain
   const allPrices = [
     ...candles.flatMap((c) => [c.high, c.low]),
     entry,
     stopLoss,
-    takeProfit,
+    ...resolvedTargets,
   ];
   const yMin = Math.min(...allPrices) * 0.999;
   const yMax = Math.max(...allPrices) * 1.001;
 
-  // Format time labels
   const formatTime = (idx: number) => {
     const d = chartData[idx];
     if (!d) return "";
     const date = new Date(d.t);
     return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   };
+
+  const tpSummary = resolvedTargets.length > 0
+    ? resolvedTargets.map((t, i) => `TP${i + 1}: $${t.toLocaleString()}`).join(" | ")
+    : "—";
 
   return (
     <div className="w-full h-52 bg-secondary/30 rounded-lg border border-border p-2">
@@ -166,7 +172,7 @@ export default function DecisionChart({
           {symbol} • {timeframe}
         </span>
         <span className="text-[9px] font-mono text-muted-foreground">
-          E: ${entry.toLocaleString()} | SL: ${stopLoss.toLocaleString()} | TP: ${takeProfit.toLocaleString()}
+          {entryLabel}: ${entry.toLocaleString()} | SL: ${stopLoss.toLocaleString()} | {tpSummary}
         </span>
         {externalCandles && externalCandles.length > 0 && (
           <span className="text-[8px] font-mono text-primary/60 ml-auto">LIVE</span>
@@ -206,7 +212,6 @@ export default function DecisionChart({
             formatter={(value: number, name: string) => [`$${value.toLocaleString()}`, name]}
           />
 
-          {/* Candlestick bodies rendered as custom layer */}
           <Customized component={CandlesLayer} />
 
           {/* Entry reference line */}
@@ -216,7 +221,7 @@ export default function DecisionChart({
             strokeWidth={1.5}
             strokeDasharray="none"
             label={{
-              value: "ENTRY",
+              value: entryLabel,
               position: "right",
               fill: "hsl(175 80% 50%)",
               fontSize: 9,
@@ -224,7 +229,7 @@ export default function DecisionChart({
             }}
           />
 
-          {/* Stop Loss reference line */}
+          {/* Stop Loss */}
           <ReferenceLine
             y={stopLoss}
             stroke="hsl(0 72% 55%)"
@@ -239,20 +244,23 @@ export default function DecisionChart({
             }}
           />
 
-          {/* Take Profit reference line */}
-          <ReferenceLine
-            y={takeProfit}
-            stroke="hsl(160 80% 48%)"
-            strokeWidth={1.5}
-            strokeDasharray="6 3"
-            label={{
-              value: "TP",
-              position: "right",
-              fill: "hsl(160 80% 48%)",
-              fontSize: 9,
-              fontFamily: "var(--font-mono)",
-            }}
-          />
+          {/* Take Profit lines */}
+          {resolvedTargets.map((tp, i) => (
+            <ReferenceLine
+              key={`tp-${i}`}
+              y={tp}
+              stroke="hsl(160 80% 48%)"
+              strokeWidth={1.5}
+              strokeDasharray="6 3"
+              label={{
+                value: `TP${i + 1}`,
+                position: "right",
+                fill: "hsl(160 80% 48%)",
+                fontSize: 9,
+                fontFamily: "var(--font-mono)",
+              }}
+            />
+          ))}
         </ComposedChart>
       </ResponsiveContainer>
     </div>
