@@ -263,6 +263,42 @@ export type Database = {
         }
         Relationships: []
       }
+      debug_trace_events: {
+        Row: {
+          asset_id: string
+          event_type: string
+          id: string
+          message: string
+          payload_json: Json
+          phase: string
+          run_id: string
+          timeframe: string
+          ts: string
+        }
+        Insert: {
+          asset_id: string
+          event_type?: string
+          id?: string
+          message?: string
+          payload_json?: Json
+          phase: string
+          run_id: string
+          timeframe?: string
+          ts?: string
+        }
+        Update: {
+          asset_id?: string
+          event_type?: string
+          id?: string
+          message?: string
+          payload_json?: Json
+          phase?: string
+          run_id?: string
+          timeframe?: string
+          ts?: string
+        }
+        Relationships: []
+      }
       epistemic_attributions: {
         Row: {
           asset_id: string
@@ -296,6 +332,51 @@ export type Database = {
           structural_change_p?: number
           timeframe_class?: string
           ts?: string
+        }
+        Relationships: []
+      }
+      evaluation_runs: {
+        Row: {
+          asset_id: string
+          created_at: string
+          decisions_written_n: number
+          error_text: string | null
+          eta_seconds: number | null
+          final_phase: string | null
+          id: string
+          progress_0_100: number
+          run_id: string
+          status: string
+          timeframe: string
+          updated_at: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          decisions_written_n?: number
+          error_text?: string | null
+          eta_seconds?: number | null
+          final_phase?: string | null
+          id?: string
+          progress_0_100?: number
+          run_id?: string
+          status?: string
+          timeframe?: string
+          updated_at?: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          decisions_written_n?: number
+          error_text?: string | null
+          eta_seconds?: number | null
+          final_phase?: string | null
+          id?: string
+          progress_0_100?: number
+          run_id?: string
+          status?: string
+          timeframe?: string
+          updated_at?: string
         }
         Relationships: []
       }

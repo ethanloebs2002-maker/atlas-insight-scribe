@@ -11,6 +11,8 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+const VERSION_TAG = "v1.8.4";
+
 // ─── GRADUATION THRESHOLDS ────────────────────────────────────────
 const GRADUATION_GATES = {
   1: { minDecisions: 500, minTrades: 150, minDirAcc: 0.65, minAvgR: 0.00 },
@@ -37,22 +39,54 @@ const CADENCE_MAP: Record<string, string> = {
   "5y": "monthly",
 };
 
-// Neutral band config per horizon for directional accuracy
 const NEUTRAL_BAND_CONFIG: Record<string, { minBand: number; atrMultiplier: number }> = {
-  "3m": { minBand: 0.01, atrMultiplier: 0.6 },   // tighter for short horizon
+  "3m": { minBand: 0.01, atrMultiplier: 0.6 },
   "6m": { minBand: 0.015, atrMultiplier: 0.25 },
   "1y": { minBand: 0.015, atrMultiplier: 0.25 },
   "3y": { minBand: 0.015, atrMultiplier: 0.25 },
   "5y": { minBand: 0.015, atrMultiplier: 0.25 },
-  "24h": { minBand: 0.0015, atrMultiplier: 0.25 }, // legacy trading horizon
+  "24h": { minBand: 0.0015, atrMultiplier: 0.25 },
 };
 
-// BH Level 1 fast-track gates (3m only accelerates L1)
 const BH_L1_FAST_GATES = {
   minDirAcc: 0.62,
   minEvBh: 0,
   minDecisions: 40,
 };
+
+// ─── DEBUG TRACE HELPER ──────────────────────────────────────────
+async function trace(runId: string, assetId: string, timeframe: string, phase: string, eventType: string, message: string, payload: any = {}) {
+  try {
+    await supabase.from("debug_trace_events").insert({
+      run_id: runId,
+      asset_id: assetId,
+      timeframe,
+      phase,
+      event_type: eventType,
+      message,
+      payload_json: payload,
+    });
+  } catch { /* non-critical */ }
+}
+
+// ─── TIMEFRAME NORMALIZATION ─────────────────────────────────────
+function normalizeTimeframeKey(input: string): string {
+  const lower = input.toLowerCase();
+  const map: Record<string, string> = {
+    "1h": "1H", "60m": "1H",
+    "4h": "4H", "240m": "4H",
+    "1d": "1D", "24h": "1D",
+    "1w": "1W",
+  };
+  return map[lower] || input;
+}
+
+function timeframeClass(tf: string): string {
+  const normalized = normalizeTimeframeKey(tf);
+  if (["1m", "5m", "15m", "30m", "1H"].includes(normalized)) return "intraday";
+  if (["4H", "8H", "12H"].includes(normalized)) return "swing";
+  return "HTF";
+}
 
 // ─── RECORD DECISION ──────────────────────────────────────────────
 async function recordDecision(body: any) {
@@ -87,6 +121,188 @@ async function recordTrade(body: any) {
   return data;
 }
 
+// ─── EMIT DECISION (GUARANTEED) ──────────────────────────────────
+async function emitDecision(
+  runId: string,
+  assetId: string,
+  timeframe: string,
+  context: {
+    currentPrice: number | null;
+    scenarios: any[];
+    agreementScore: number;
+    consensusScore: number;
+    completenessScore: number;
+    anomalyHalt: boolean;
+    haltReason: string | null;
+    evaluatedDecisions: number;
+    evaluatedTrades: number;
+    error: string | null;
+  }
+) {
+  await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "emitDecision called", context);
+
+  // A) If anomaly halt => PAUSED decision
+  if (context.anomalyHalt) {
+    const decision = await supabase.from("paper_decisions").insert({
+      asset_id: assetId,
+      timeframe,
+      horizon: "24h",
+      ref_price: context.currentPrice || 0,
+      direction_pred: "NEUTRAL",
+      probability_pred: 0.5,
+      agreement_score: 0,
+      consensus_score: 0,
+      completeness_score: 0,
+      evidence_snapshot_json: {
+        run_id: runId,
+        decision_type: "PAUSED",
+        blockers: [context.haltReason || "System in HALT state"],
+        version_tag: VERSION_TAG,
+      },
+    }).select().single();
+
+    await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "PAUSED decision written", { id: decision.data?.id });
+    return { decision_type: "PAUSED", decision: decision.data };
+  }
+
+  // B) If error
+  if (context.error) {
+    const decision = await supabase.from("paper_decisions").insert({
+      asset_id: assetId,
+      timeframe,
+      horizon: "24h",
+      ref_price: context.currentPrice || 0,
+      direction_pred: "NEUTRAL",
+      probability_pred: 0.5,
+      agreement_score: 0,
+      consensus_score: 0,
+      completeness_score: 0,
+      evidence_snapshot_json: {
+        run_id: runId,
+        decision_type: "ERROR",
+        blockers: [context.error],
+        version_tag: VERSION_TAG,
+      },
+    }).select().single();
+
+    await trace(runId, assetId, timeframe, "FINALIZE", "ERROR", "ERROR decision written", { id: decision.data?.id });
+    return { decision_type: "ERROR", decision: decision.data };
+  }
+
+  // C) Try to build a trade candidate from analysis data
+  if (context.currentPrice && context.scenarios?.length > 0) {
+    const best = context.scenarios[0];
+    const evidence = best.evidence || [];
+    const hasBullish = evidence.some((e: any) => e.interpretation?.toLowerCase().includes("bullish"));
+    const hasBearish = evidence.some((e: any) => e.interpretation?.toLowerCase().includes("bearish"));
+
+    // Determine direction from scenario
+    let direction = "NEUTRAL";
+    if (best.type === "bullish") direction = "UP";
+    else if (best.type === "bearish") direction = "DOWN";
+
+    const probability = best.probability || 0.5;
+    const confidence = Math.round(probability * 100);
+
+    if (confidence >= 40 && direction !== "NEUTRAL") {
+      // TRADE_CANDIDATE
+      const entryZone = best.entryZones?.[0];
+      const stopLoss = best.stopLoss;
+      const targets = best.targets || [];
+
+      const decision = await supabase.from("paper_decisions").insert({
+        asset_id: assetId,
+        timeframe,
+        horizon: "24h",
+        ref_price: context.currentPrice,
+        direction_pred: direction,
+        probability_pred: probability,
+        agreement_score: context.agreementScore,
+        consensus_score: context.consensusScore,
+        completeness_score: context.completenessScore,
+        evidence_snapshot_json: {
+          run_id: runId,
+          decision_type: "TRADE_CANDIDATE",
+          direction,
+          confidence,
+          entry_zone: entryZone ? { low: entryZone.priceRange?.[0], high: entryZone.priceRange?.[1] } : null,
+          stop_loss: stopLoss,
+          targets: targets.map((t: any) => ({ price: t.price, label: t.label })),
+          rationale: `${direction} signal with ${confidence}% confidence. Agreement: ${(context.agreementScore * 100).toFixed(0)}%, Consensus: ${(context.consensusScore * 100).toFixed(0)}%.`,
+          gates_snapshot: {
+            agreement: context.agreementScore,
+            consensus: context.consensusScore,
+            completeness: context.completenessScore,
+            anomaly_halt: false,
+          },
+          version_tag: VERSION_TAG,
+        },
+      }).select().single();
+
+      // Also create a paper trade
+      if (entryZone && stopLoss && decision.data) {
+        await supabase.from("paper_trades").insert({
+          decision_id: decision.data.id,
+          asset_id: assetId,
+          timeframe,
+          scenario_type: best.type || "bullish",
+          regime_label: best.regime || "Unknown",
+          entry_zone_low: entryZone.priceRange?.[0] || context.currentPrice * 0.99,
+          entry_zone_high: entryZone.priceRange?.[1] || context.currentPrice * 1.01,
+          trigger_rule: entryZone.trigger || "Price enters zone",
+          stop_level: stopLoss.level || context.currentPrice * 0.95,
+          stop_rule: stopLoss.condition || "Break below stop",
+          targets_json: targets.map((t: any) => ({ price: t.price })),
+          status: "PENDING",
+          evidence_snapshot_json: { run_id: runId },
+        });
+      }
+
+      await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "TRADE_CANDIDATE decision written", { id: decision.data?.id, direction, confidence });
+      return { decision_type: "TRADE_CANDIDATE", decision: decision.data };
+    }
+  }
+
+  // D) NO_TRADE fallback — always emit
+  const blockers: string[] = [];
+  if (context.agreementScore < 0.5) blockers.push(`Low agreement score: ${(context.agreementScore * 100).toFixed(0)}%`);
+  if (context.consensusScore < 0.5) blockers.push(`Low consensus score: ${(context.consensusScore * 100).toFixed(0)}%`);
+  if (context.completenessScore < 0.5) blockers.push(`Low data completeness: ${(context.completenessScore * 100).toFixed(0)}%`);
+  if (!context.currentPrice) blockers.push("Could not fetch current price");
+  if (!context.scenarios?.length) blockers.push("No scenarios generated from analysis");
+  if (blockers.length === 0) blockers.push("Insufficient signal confidence for trade entry");
+
+  const decision = await supabase.from("paper_decisions").insert({
+    asset_id: assetId,
+    timeframe,
+    horizon: "24h",
+    ref_price: context.currentPrice || 0,
+    direction_pred: "NEUTRAL",
+    probability_pred: 0.3,
+    agreement_score: context.agreementScore,
+    consensus_score: context.consensusScore,
+    completeness_score: context.completenessScore,
+    evidence_snapshot_json: {
+      run_id: runId,
+      decision_type: "NO_TRADE",
+      direction: "NONE",
+      confidence: 30,
+      rationale: `No trade: ${blockers.slice(0, 3).join(". ")}.`,
+      blockers,
+      gates_snapshot: {
+        agreement: context.agreementScore,
+        consensus: context.consensusScore,
+        completeness: context.completenessScore,
+        anomaly_halt: false,
+      },
+      version_tag: VERSION_TAG,
+    },
+  }).select().single();
+
+  await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "NO_TRADE decision written", { id: decision.data?.id, blockers });
+  return { decision_type: "NO_TRADE", decision: decision.data };
+}
+
 // ─── EVALUATE DECISIONS ───────────────────────────────────────────
 async function evaluateDecisions(asset_id: string, horizon?: string) {
   let query = supabase
@@ -103,13 +319,11 @@ async function evaluateDecisions(asset_id: string, horizon?: string) {
   if (error) throw error;
   if (!decisions?.length) return { evaluated: 0 };
 
-  // Fetch current price
   const priceRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=market&symbols=${asset_id}`);
   const priceJson = await priceRes.json();
   const currentPrice = priceJson.data?.[0]?.price;
   if (!currentPrice) return { evaluated: 0, error: "Could not fetch current price" };
 
-  // ATR for neutral band
   const klinesRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=analysis&symbols=${asset_id}`);
   const klinesJson = await klinesRes.json();
   const atrSignal = klinesJson.data?.scenarios?.[0]?.evidence?.find((e: any) => e.signal === "ATR");
@@ -125,10 +339,8 @@ async function evaluateDecisions(asset_id: string, horizon?: string) {
     const evalTime = new Date(decisionTime.getTime() + horizonHours * 60 * 60 * 1000);
     if (now < evalTime) continue;
 
-    // Use horizon-specific neutral band config
     const bandCfg = NEUTRAL_BAND_CONFIG[d.horizon] || NEUTRAL_BAND_CONFIG["24h"];
     const neutralBand = Math.max(bandCfg.minBand, bandCfg.atrMultiplier * atrPct);
-
     const movePct = (currentPrice - d.ref_price) / d.ref_price;
 
     let realizedDir: string;
@@ -148,7 +360,6 @@ async function evaluateDecisions(asset_id: string, horizon?: string) {
     evaluated++;
   }
 
-  // Update graduation for all relevant horizons
   const horizonsToUpdate = horizon ? [horizon] : [...new Set(decisions.map(d => d.horizon))];
   for (const h of horizonsToUpdate) {
     await updateGraduation(asset_id, decisions[0]?.timeframe || "4h", h);
@@ -292,13 +503,10 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
   const sorted = [...returns].sort((a, b) => a - b);
   const medianR = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
 
-  // Determine graduation level with BH fast-track logic
   let level = 0;
 
-  // Check if 3m can fast-track Level 1 (BH only)
   const isBhHorizon = LEARNING_HORIZONS.includes(horizon);
   if (isBhHorizon && horizon === "3m") {
-    // 3m can only accelerate L1
     if (
       dirAcc >= BH_L1_FAST_GATES.minDirAcc &&
       avgR > BH_L1_FAST_GATES.minEvBh &&
@@ -308,7 +516,6 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
     }
   }
 
-  // Standard graduation gates (L1–L3), override if higher
   for (let l = 3; l >= 1; l--) {
     const gate = GRADUATION_GATES[l as 1 | 2 | 3];
     if (
@@ -322,7 +529,6 @@ async function updateGraduation(asset_id: string, timeframe = "4h", horizon = "2
     }
   }
 
-  // For 3m horizon: cap at L1 to prevent short-horizon overfitting
   if (horizon === "3m" && level > 1) {
     level = 1;
   }
@@ -360,7 +566,6 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     decisionsQuery, tradesQuery, gradQuery,
   ]);
 
-  // Compute confusion matrix
   const evaluated = (decisions.data || []).filter(d => d.evaluated_at);
   const confusionMatrix = { UP: { UP: 0, DOWN: 0, NEUTRAL: 0 }, DOWN: { UP: 0, DOWN: 0, NEUTRAL: 0 }, NEUTRAL: { UP: 0, DOWN: 0, NEUTRAL: 0 } };
   for (const d of evaluated) {
@@ -369,18 +574,15 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     }
   }
 
-  // MAE_R distribution
   const closedTrades = (trades.data || []).filter(t => t.status === "CLOSED" && t.mae_r !== null);
   const maeDistribution = closedTrades.map(t => t.mae_r);
 
-  // BH horizon breakdown: compute per-horizon stats for 3m fast feedback
   const bhHorizonStats: Record<string, any> = {};
   for (const h of LEARNING_HORIZONS) {
     const hDecisions = (decisions.data || []).filter(d => d.horizon === h);
     const hEvaluated = hDecisions.filter(d => d.evaluated_at);
     const hCorrect = hEvaluated.filter(d => d.correct);
     const hDirAcc = hEvaluated.length > 0 ? hCorrect.length / hEvaluated.length : 0;
-
     const hGrad = (graduation.data || []).find(g => g.horizon === h);
 
     bhHorizonStats[h] = {
@@ -398,6 +600,11 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     };
   }
 
+  // Fetch latest evaluation run
+  let lastRunQuery = supabase.from("evaluation_runs").select("*").order("created_at", { ascending: false }).limit(1);
+  if (asset_id) lastRunQuery = lastRunQuery.eq("asset_id", asset_id);
+  const { data: lastRunData } = await lastRunQuery;
+
   return {
     decisions: decisions.data || [],
     trades: trades.data || [],
@@ -405,12 +612,157 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     confusionMatrix,
     maeDistribution,
     bhHorizonStats,
+    lastRun: lastRunData?.[0] || null,
     config: {
       publicHorizons: PUBLIC_HORIZONS,
       learningHorizons: LEARNING_HORIZONS,
       cadenceMap: CADENCE_MAP,
     },
   };
+}
+
+// ─── FULL EVALUATE PIPELINE (WITH DECISION EMISSION) ──────────────
+async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: string) {
+  // Create evaluation run
+  const { data: runRow } = await supabase.from("evaluation_runs").insert({
+    asset_id,
+    timeframe,
+    status: "STARTED",
+    progress_0_100: 0,
+  }).select().single();
+
+  const runId = runRow?.run_id || crypto.randomUUID();
+
+  await trace(runId, asset_id, timeframe, "BOOTSTRAP", "INFO", "Evaluation started", { horizon, version: VERSION_TAG });
+
+  let currentPrice: number | null = null;
+  let scenarios: any[] = [];
+  let agreementScore = 0;
+  let consensusScore = 0;
+  let completenessScore = 0;
+  let anomalyHalt = false;
+  let haltReason: string | null = null;
+  let evalError: string | null = null;
+
+  try {
+    // Phase: DATA_FETCH
+    await trace(runId, asset_id, timeframe, "DATA_FETCH", "INFO", "Fetching market data");
+    const priceRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=market&symbols=${asset_id}`);
+    const priceJson = await priceRes.json();
+    currentPrice = priceJson.data?.[0]?.price || null;
+    await trace(runId, asset_id, timeframe, "DATA_FETCH", "INFO", "Market data fetched", { price: currentPrice });
+
+    // Phase: DATA_CLEAN - check system status
+    await trace(runId, asset_id, timeframe, "DATA_CLEAN", "INFO", "Checking system status");
+    const { data: sysStatus } = await supabase.from("system_status").select("*").eq("asset_id", asset_id).maybeSingle();
+    if (sysStatus?.anomaly_halt) {
+      anomalyHalt = true;
+      haltReason = sysStatus.reason || "System in HALT state";
+    }
+
+    // Phase: INDICATORS - fetch analysis
+    await trace(runId, asset_id, timeframe, "INDICATORS", "INFO", "Running analysis");
+    const analysisRes = await fetch(`${supabaseUrl}/functions/v1/crypto-data?action=analysis&symbols=${asset_id}`);
+    const analysisJson = await analysisRes.json();
+    scenarios = analysisJson.data?.scenarios || [];
+    await trace(runId, asset_id, timeframe, "INDICATORS", "INFO", "Analysis complete", { scenarioCount: scenarios.length });
+
+    // Phase: CONSENSUS_BUILD - compute scores from scenarios
+    if (scenarios.length > 0) {
+      const best = scenarios[0];
+      const evidenceCount = best.evidence?.length || 0;
+      completenessScore = Math.min(1, evidenceCount / 8);
+
+      // Simple agreement: how many evidence items agree with scenario direction
+      const agreeCount = (best.evidence || []).filter((e: any) => {
+        const interp = (e.interpretation || "").toLowerCase();
+        if (best.type === "bullish") return interp.includes("bullish") || interp.includes("positive");
+        if (best.type === "bearish") return interp.includes("bearish") || interp.includes("negative");
+        return interp.includes("neutral");
+      }).length;
+      agreementScore = evidenceCount > 0 ? agreeCount / evidenceCount : 0;
+      consensusScore = best.probability || 0.5;
+    }
+    await trace(runId, asset_id, timeframe, "CONSENSUS_BUILD", "INFO", "Consensus computed", { agreementScore, consensusScore, completenessScore });
+
+    // Evaluate existing pending decisions
+    const [decResult, tradeResult] = await Promise.all([
+      evaluateDecisions(asset_id, horizon),
+      evaluateTrades(asset_id),
+    ]);
+    await trace(runId, asset_id, timeframe, "CROSS_REFERENCE", "INFO", "Existing decisions/trades evaluated", { decisions: decResult, trades: tradeResult });
+
+    // Phase: FINALIZE - emit guaranteed decision
+    const emitResult = await emitDecision(runId, asset_id, timeframe, {
+      currentPrice,
+      scenarios,
+      agreementScore,
+      consensusScore,
+      completenessScore,
+      anomalyHalt,
+      haltReason,
+      evaluatedDecisions: decResult.evaluated,
+      evaluatedTrades: (tradeResult as any).filled + (tradeResult as any).closed,
+      error: null,
+    });
+
+    // Update run as completed
+    await supabase.from("evaluation_runs").update({
+      status: "COMPLETED",
+      progress_0_100: 100,
+      final_phase: "FINALIZE",
+      decisions_written_n: 1,
+      updated_at: new Date().toISOString(),
+    }).eq("run_id", runId);
+
+    await trace(runId, asset_id, timeframe, "FINALIZE", "INFO", "Evaluation completed", { decision_type: emitResult.decision_type });
+
+    return {
+      run_id: runId,
+      status: "COMPLETED",
+      decisions_written: 1,
+      decision_type: emitResult.decision_type,
+      decision: emitResult.decision,
+      evaluated_existing: {
+        decisions: decResult,
+        trades: tradeResult,
+      },
+    };
+
+  } catch (err) {
+    evalError = (err as Error).message;
+    await trace(runId, asset_id, timeframe, "FINALIZE", "ERROR", `Evaluation error: ${evalError}`);
+
+    // Still emit an ERROR decision
+    const emitResult = await emitDecision(runId, asset_id, timeframe, {
+      currentPrice,
+      scenarios,
+      agreementScore,
+      consensusScore,
+      completenessScore,
+      anomalyHalt,
+      haltReason,
+      evaluatedDecisions: 0,
+      evaluatedTrades: 0,
+      error: evalError,
+    });
+
+    await supabase.from("evaluation_runs").update({
+      status: "ERROR",
+      progress_0_100: 0,
+      error_text: evalError,
+      decisions_written_n: 1,
+      updated_at: new Date().toISOString(),
+    }).eq("run_id", runId);
+
+    return {
+      run_id: runId,
+      status: "ERROR",
+      decisions_written: 1,
+      decision_type: emitResult.decision_type,
+      error: evalError,
+    };
+  }
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────
@@ -421,8 +773,8 @@ function parseHorizon(horizon: string): number {
   const n = parseInt(val);
   if (unit === "h") return n;
   if (unit === "d") return n * 24;
-  if (unit === "m") return n * 30 * 24;    // months
-  if (unit === "y") return n * 365 * 24;   // years
+  if (unit === "m") return n * 30 * 24;
+  if (unit === "y") return n * 365 * 24;
   return 24;
 }
 
@@ -464,11 +816,9 @@ serve(async (req) => {
     if (action === "evaluate") {
       if (!asset) throw new Error("asset parameter required");
       const horizon = url.searchParams.get("horizon") || undefined;
-      const [decResult, tradeResult] = await Promise.all([
-        evaluateDecisions(asset, horizon),
-        evaluateTrades(asset),
-      ]);
-      return new Response(JSON.stringify({ data: { decisions: decResult, trades: tradeResult } }), {
+      const timeframe = url.searchParams.get("timeframe") || "4h";
+      const result = await runFullEvaluation(asset, timeframe, horizon);
+      return new Response(JSON.stringify({ data: result }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -478,6 +828,24 @@ serve(async (req) => {
       const horizon = url.searchParams.get("horizon") || "24h";
       const result = await updateGraduation(asset, "4h", horizon);
       return new Response(JSON.stringify({ data: result }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "last-run") {
+      let query = supabase.from("evaluation_runs").select("*").order("created_at", { ascending: false }).limit(1);
+      if (asset) query = query.eq("asset_id", asset);
+      const { data } = await query;
+      return new Response(JSON.stringify({ data: data?.[0] || null }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "trace") {
+      const runId = url.searchParams.get("run_id");
+      if (!runId) throw new Error("run_id parameter required");
+      const { data } = await supabase.from("debug_trace_events").select("*").eq("run_id", runId).order("ts", { ascending: true }).limit(100);
+      return new Response(JSON.stringify({ data: data || [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
