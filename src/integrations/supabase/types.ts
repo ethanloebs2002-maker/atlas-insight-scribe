@@ -2908,6 +2908,59 @@ export type Database = {
         }
         Relationships: []
       }
+      whale_watch_events: {
+        Row: {
+          asset_id: string
+          chain: string | null
+          confidence: number | null
+          created_at: string
+          details_json: Json
+          direction: string | null
+          event_type: string
+          id: string
+          size_usd: number | null
+          source: string
+          tx_hash: string | null
+          whale_wallet_id: string | null
+        }
+        Insert: {
+          asset_id: string
+          chain?: string | null
+          confidence?: number | null
+          created_at?: string
+          details_json?: Json
+          direction?: string | null
+          event_type?: string
+          id?: string
+          size_usd?: number | null
+          source?: string
+          tx_hash?: string | null
+          whale_wallet_id?: string | null
+        }
+        Update: {
+          asset_id?: string
+          chain?: string | null
+          confidence?: number | null
+          created_at?: string
+          details_json?: Json
+          direction?: string | null
+          event_type?: string
+          id?: string
+          size_usd?: number | null
+          source?: string
+          tx_hash?: string | null
+          whale_wallet_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whale_watch_events_whale_wallet_id_fkey"
+            columns: ["whale_wallet_id"]
+            isOneToOne: false
+            referencedRelation: "whale_wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       paper_trades: {

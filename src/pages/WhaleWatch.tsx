@@ -1,27 +1,6 @@
-import WhaleTable from '@/components/WhaleTable';
-import { Anchor } from 'lucide-react';
+import WhaleWatchPanel from '@/components/whale/WhaleWatchPanel';
 
 export default function WhaleWatch() {
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Anchor className="h-5 w-5 text-primary" />
-        <div>
-          <h1 className="text-lg font-bold text-foreground">Whale Watch</h1>
-          <p className="text-xs text-muted-foreground font-mono">Track historically successful large participants</p>
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-border bg-card/50 p-6 text-center">
-        <p className="text-xs font-mono text-muted-foreground">No whale data available. Run an evaluation to populate whale tracking.</p>
-      </div>
-
-      <div className="rounded-lg border border-border bg-card/50 p-3">
-        <p className="text-[10px] font-mono text-muted-foreground">
-          Whale tracking uses on-chain inference. Wallet labels are community-sourced and may be incorrect.
-          Trade attribution has inherent uncertainty — always verify independently.
-        </p>
-      </div>
-    </div>
-  );
+  // Default to BTC — in production this would come from route params or selected asset
+  return <WhaleWatchPanel assetId="BTC" timeframe="4h" />;
 }

@@ -29,3 +29,9 @@ verify_jwt = false
 
 [functions.whale-signal]
 verify_jwt = false
+
+[functions.whale-exchange-scan]
+verify_jwt = false
+
+[functions.whale-onchain-scan]
+verify_jwt = false
