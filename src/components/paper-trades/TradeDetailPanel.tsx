@@ -1,0 +1,237 @@
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import TradeChart, { type Candle } from "@/components/paper-trades/TradeChart";
+import { useAssetAnalysis } from "@/hooks/use-crypto-data";
+import { useLivePrice } from "@/hooks/use-live-price";
+import type { TradeVM, PriceLevel } from "@/types/trade-vm";
+import { Target, Bug, ChevronDown, BarChart3, Clock, Layers } from "lucide-react";
+import { useState, useMemo } from "react";
+
+function fmtPrice(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return `$${v.toLocaleString()}`;
+}
+
+function fmtTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  PROPOSED: "bg-secondary text-muted-foreground",
+  PENDING_ENTRY: "bg-primary/20 text-primary",
+  OPEN: "bg-bullish/10 text-bullish",
+  CLOSED: "bg-muted text-muted-foreground",
+};
+
+const SIDE_COLORS: Record<string, string> = {
+  LONG: "bg-bullish/10 text-bullish border-bullish",
+  SHORT: "bg-bearish/10 text-bearish border-bearish",
+};
+
+export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
+  const [debugOpen, setDebugOpen] = useState(false);
+
+  if (!vm) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center p-6">
+        <BarChart3 className="h-10 w-10 text-muted-foreground/30 mb-3" />
+        <p className="text-xs font-mono text-muted-foreground">
+          Select a decision or trade to view details
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 min-w-0">
+      {/* Header */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-sm font-mono font-bold">{vm.symbol}</span>
+        <Badge variant="outline" className={`text-[8px] font-mono py-0 h-4 ${SIDE_COLORS[vm.side]}`}>
+          {vm.side}
+        </Badge>
+        <Badge variant="outline" className={`text-[8px] font-mono py-0 h-4 ${STATUS_COLORS[vm.status]}`}>
+          {vm.status.replace("_", " ")}
+        </Badge>
+        <Badge variant="secondary" className="text-[9px] font-mono">{vm.timeframe}</Badge>
+        <Badge variant="secondary" className="text-[9px] font-mono">{vm.horizon}</Badge>
+        <span className="text-[10px] font-mono font-bold">{vm.probability.displayPct}%</span>
+        {vm.probability.source !== "model" && (
+          <span className="text-[8px] font-mono text-muted-foreground">({vm.probability.source})</span>
+        )}
+      </div>
+
+      {/* Tabbed content */}
+      <Tabs defaultValue="chart" className="min-w-0">
+        <TabsList className="font-mono text-[10px] bg-secondary">
+          <TabsTrigger value="chart" className="text-[10px] gap-1"><BarChart3 className="h-3 w-3" />Chart</TabsTrigger>
+          <TabsTrigger value="lifecycle" className="text-[10px] gap-1"><Clock className="h-3 w-3" />Lifecycle</TabsTrigger>
+          <TabsTrigger value="levels" className="text-[10px] gap-1"><Layers className="h-3 w-3" />Levels</TabsTrigger>
+        </TabsList>
+
+        {/* Chart Tab */}
+        <TabsContent value="chart" className="mt-3 min-w-0">
+          <ChartWithLiveData vm={vm} />
+        </TabsContent>
+
+        {/* Lifecycle Tab */}
+        <TabsContent value="lifecycle" className="mt-3">
+          <Card>
+            <CardContent className="py-3 px-3 space-y-2">
+              <TimelineStep label="Decided" time={vm.timestamps.decidedAt} active />
+              <TimelineStep label="Entry Placed" time={vm.timestamps.entryPlacedAt} active={vm.timestamps.entryPlacedAt != null} />
+              <TimelineStep label="Entry Filled" time={vm.timestamps.entryFilledAt} active={vm.timestamps.entryFilledAt != null} />
+              <TimelineStep label="Closed" time={vm.timestamps.closedAt} active={vm.timestamps.closedAt != null} />
+              {vm.timestamps.expiresAt && (
+                <TimelineStep label="Expires" time={vm.timestamps.expiresAt} active={false} />
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Levels Tab */}
+        <TabsContent value="levels" className="mt-3">
+          <Card>
+            <CardHeader className="py-2 px-3">
+              <CardTitle className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Target className="h-3 w-3" />
+                Key Levels
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-3 pb-3">
+              <div className="grid grid-cols-2 gap-2">
+                <LevelCard level={vm.levels.entry} />
+                <LevelCard level={vm.levels.sl} />
+                <LevelCard level={vm.levels.tp} />
+                <LevelCard level={vm.levels.live} />
+                {vm.levels.exit && <LevelCard level={vm.levels.exit} />}
+              </div>
+              {vm.performance?.realizedR != null && (
+                <div className="mt-2 pt-2 border-t border-border flex justify-between text-[10px] font-mono">
+                  <span className="text-muted-foreground">Return R</span>
+                  <span className={vm.performance.realizedR >= 0 ? "text-bullish font-bold" : "text-bearish font-bold"}>
+                    {vm.performance.realizedR.toFixed(3)}
+                  </span>
+                </div>
+              )}
+              {vm.performance?.realizedPnL != null && (
+                <div className="flex justify-between text-[10px] font-mono">
+                  <span className="text-muted-foreground">PnL</span>
+                  <span className={vm.performance.realizedPnL >= 0 ? "text-bullish font-bold" : "text-bearish font-bold"}>
+                    ${vm.performance.realizedPnL.toFixed(2)}
+                  </span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Debug section */}
+      <Collapsible open={debugOpen} onOpenChange={setDebugOpen}>
+        <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors w-full">
+          <Bug className="h-3 w-3" />
+          Diagnostics
+          <ChevronDown className={`h-3 w-3 ml-auto transition-transform ${debugOpen ? "rotate-180" : ""}`} />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <Card className="mt-2">
+            <CardContent className="py-2 px-3 space-y-1 text-[9px] font-mono text-muted-foreground">
+              <div>entry_source: <span className="text-foreground">{vm.debug?.entrySourceReason ?? "—"}</span></div>
+              <div>probability_source: <span className="text-foreground">{vm.probability.source}</span></div>
+              <div>decision_id: <span className="text-foreground break-all">{vm.decisionId}</span></div>
+              <div>vm_id: <span className="text-foreground break-all">{vm.id}</span></div>
+              {vm.debug?.gating && (
+                <div className="mt-1 pt-1 border-t border-border">
+                  <div className="font-bold text-foreground mb-0.5">Gating</div>
+                  {Object.entries(vm.debug.gating).map(([k, v]) => (
+                    <div key={k} className="flex justify-between">
+                      <span>{k}</span>
+                      <span className="text-foreground">{JSON.stringify(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}
+
+// ─── Sub-components ──────────────────────────────────────────────
+
+function LevelCard({ level }: { level: PriceLevel }) {
+  const kindColors: Record<string, string> = {
+    ENTRY: "",
+    TP: "text-bullish",
+    SL: "text-bearish",
+    LIVE: "text-primary",
+    EXIT: "text-muted-foreground",
+  };
+  return (
+    <div className="rounded border border-border bg-secondary/40 p-2">
+      <div className="flex items-center gap-1">
+        <div className="text-[9px] font-mono text-muted-foreground uppercase">{level.label}</div>
+        <span className="text-[7px] font-mono text-muted-foreground/50 ml-auto">{level.source}</span>
+      </div>
+      <div className={`text-xs font-mono font-bold ${kindColors[level.kind] || ""}`}>
+        {level.value != null ? `$${level.value.toLocaleString()}` : "—"}
+      </div>
+      {level.style !== "solid" && (
+        <div className="text-[7px] font-mono text-muted-foreground/40">{level.style}</div>
+      )}
+    </div>
+  );
+}
+
+function TimelineStep({ label, time, active }: { label: string; time: string | null | undefined; active: boolean }) {
+  return (
+    <div className={`flex items-center gap-2 text-[10px] font-mono ${active ? "text-foreground" : "text-muted-foreground/40"}`}>
+      <div className={`h-2 w-2 rounded-full shrink-0 ${active ? "bg-primary" : "bg-muted-foreground/20"}`} />
+      <span className="font-bold w-24">{label}</span>
+      <span>{fmtTime(time)}</span>
+    </div>
+  );
+}
+
+function ChartWithLiveData({ vm }: { vm: TradeVM }) {
+  const { data: analysis } = useAssetAnalysis(vm.symbol, vm.timeframe);
+  const livePrice = useLivePrice({ symbol: vm.symbol, pollMs: 5000, enabled: true });
+
+  const candles: Candle[] | undefined = analysis?.chartData?.map((c: any) => ({
+    t: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+  }));
+
+  // Build levels array with live price injected
+  const levels = useMemo(() => {
+    const arr: PriceLevel[] = [vm.levels.entry, vm.levels.tp, vm.levels.sl];
+    if (vm.levels.exit) arr.push(vm.levels.exit);
+    // Override live price from hook
+    arr.push({
+      value: livePrice,
+      label: "Live",
+      source: "MARKET",
+      kind: "LIVE",
+      style: livePrice != null ? "solid" : "ghost",
+    });
+    return arr;
+  }, [vm.levels, livePrice]);
+
+  return (
+    <TradeChart
+      candles={candles ?? []}
+      levels={levels}
+      side={vm.side}
+      status={vm.status}
+      symbol={vm.symbol}
+      timeframe={vm.timeframe}
+    />
+  );
+}
