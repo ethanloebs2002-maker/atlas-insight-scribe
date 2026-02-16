@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { insertWhaleContextSnapshot } from "../_shared/whale-context.ts";
+import { buildAttributionPayload } from "../_shared/attribution.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -423,20 +424,29 @@ async function emitDecision(
 
             // ── Hook: Populate trade_scenario_attribution ──
             try {
-              const scenarioRows = context.scenarios.map((s: any, idx: number) => ({
+              const attributionScenarios = buildAttributionPayload(context.scenarios ?? []);
+              const scenarioRows = attributionScenarios.map((s) => ({
                 position_id: position.id,
                 decision_id: decision.data!.id,
                 symbol: assetId,
                 timeframe,
-                scenario_key: s.type || `scenario_${idx}`,
-                contributed_direction: s.type === "bullish" ? "LONG" : s.type === "bearish" ? "SHORT" : "NEUTRAL",
-                contributed_confidence: clampProbability(s.probability ?? 0, "scenario_attribution"),
+                scenario_key: s.scenario_key,
+                contributed_direction: s.contributed_direction ?? "NEUTRAL",
+                contributed_confidence: s.contributed_confidence != null ? clampProbability(s.contributed_confidence, "scenario_attribution") : null,
                 regime: best.regime || null,
-                metadata: { horizon, run_id: runId, evidence_count: s.evidence?.length ?? 0 },
+                metadata: { horizon, run_id: runId, ...(s.metadata ?? {}) },
               }));
               if (scenarioRows.length > 0) {
-                await supabase.from("trade_scenario_attribution").insert(scenarioRows);
+                await supabase.from("trade_scenario_attribution").upsert(scenarioRows, { onConflict: "position_id,scenario_key" });
               }
+              // Persist attribution on decision metadata
+              await supabase.from("paper_decisions").update({
+                probability_components: {
+                  ...(decision.data!.probability_components as any ?? {}),
+                  attribution_scenarios: attributionScenarios,
+                  attribution_version: "v3.0",
+                },
+              }).eq("id", decision.data!.id);
             } catch (e) { console.warn("[scenario-attribution] insert failed:", (e as Error).message); }
           }
         }
