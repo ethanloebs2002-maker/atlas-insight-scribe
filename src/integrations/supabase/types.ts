@@ -2744,6 +2744,95 @@ export type Database = {
         }
         Relationships: []
       }
+      whale_context_snapshots: {
+        Row: {
+          created_at: string
+          decision_id: string | null
+          exchange_inflow_24h_count: number
+          exchange_outflow_24h_count: number
+          flow_bias_24h: number
+          id: string
+          large_trade_24h_count: number
+          large_transfer_24h_count: number
+          last_event_notional_usd: number | null
+          last_event_severity: number | null
+          last_event_source: string | null
+          last_event_time: string | null
+          last_event_type: string | null
+          metadata: Json
+          snapshot_time: string
+          symbol: string
+          trade_id: string | null
+          volume_spike_24h_count: number
+          window_1h_count: number
+          window_1h_severity_sum: number
+          window_24h_count: number
+          window_24h_severity_sum: number
+          window_6h_count: number
+          window_6h_severity_sum: number
+        }
+        Insert: {
+          created_at?: string
+          decision_id?: string | null
+          exchange_inflow_24h_count?: number
+          exchange_outflow_24h_count?: number
+          flow_bias_24h?: number
+          id?: string
+          large_trade_24h_count?: number
+          large_transfer_24h_count?: number
+          last_event_notional_usd?: number | null
+          last_event_severity?: number | null
+          last_event_source?: string | null
+          last_event_time?: string | null
+          last_event_type?: string | null
+          metadata?: Json
+          snapshot_time: string
+          symbol: string
+          trade_id?: string | null
+          volume_spike_24h_count?: number
+          window_1h_count?: number
+          window_1h_severity_sum?: number
+          window_24h_count?: number
+          window_24h_severity_sum?: number
+          window_6h_count?: number
+          window_6h_severity_sum?: number
+        }
+        Update: {
+          created_at?: string
+          decision_id?: string | null
+          exchange_inflow_24h_count?: number
+          exchange_outflow_24h_count?: number
+          flow_bias_24h?: number
+          id?: string
+          large_trade_24h_count?: number
+          large_transfer_24h_count?: number
+          last_event_notional_usd?: number | null
+          last_event_severity?: number | null
+          last_event_source?: string | null
+          last_event_time?: string | null
+          last_event_type?: string | null
+          metadata?: Json
+          snapshot_time?: string
+          symbol?: string
+          trade_id?: string | null
+          volume_spike_24h_count?: number
+          window_1h_count?: number
+          window_1h_severity_sum?: number
+          window_24h_count?: number
+          window_24h_severity_sum?: number
+          window_6h_count?: number
+          window_6h_severity_sum?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whale_context_snapshots_symbol_fkey"
+            columns: ["symbol"]
+            isOneToOne: false
+            referencedRelation: "atlas_assets"
+            referencedColumns: ["symbol"]
+          },
+        ]
+      }
       whale_engine_runs: {
         Row: {
           engine: string
