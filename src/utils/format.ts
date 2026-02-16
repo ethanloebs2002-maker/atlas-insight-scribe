@@ -1,30 +1,27 @@
-import { formatDistanceToNow } from 'date-fns';
-
-export function formatUSD(value: number | null | undefined): string {
-  if (value == null) return '—';
-  if (Math.abs(value) >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
-  if (Math.abs(value) >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
-  if (Math.abs(value) >= 1e3) return `$${(value / 1e3).toFixed(1)}K`;
-  return `$${value.toFixed(2)}`;
+export function formatUsd(n: number) {
+  const x = Number(n ?? 0);
+  if (!Number.isFinite(x)) return "$0";
+  if (x >= 1_000_000_000) return `$${(x / 1_000_000_000).toFixed(2)}B`;
+  if (x >= 1_000_000) return `$${(x / 1_000_000).toFixed(2)}M`;
+  if (x >= 1_000) return `$${(x / 1_000).toFixed(2)}K`;
+  return `$${x.toFixed(0)}`;
 }
 
-export function formatPct(value: number | null | undefined, decimals = 1): string {
-  if (value == null) return '—';
-  return `${(value * 100).toFixed(decimals)}%`;
-}
+/** @deprecated Use formatUsd instead */
+export const formatUSD = formatUsd;
 
-export function formatPctRaw(value: number | null | undefined, decimals = 1): string {
-  if (value == null) return '—';
-  return `${value.toFixed(decimals)}%`;
-}
-
-export function formatTimeAgo(ts: string | null | undefined): string {
-  if (!ts) return '—';
-  try {
-    return formatDistanceToNow(new Date(ts), { addSuffix: true });
-  } catch {
-    return '—';
-  }
+export function formatTimeAgo(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  const d = Date.now() - t;
+  const s = Math.max(0, Math.floor(d / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ago`;
+  const days = Math.floor(h / 24);
+  return `${days}d ago`;
 }
 
 export function formatHoldTime(hours: number | null | undefined): string {
