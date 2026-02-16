@@ -1,5 +1,13 @@
 export type UIStatus = "PROPOSED" | "PENDING_ENTRY" | "OPEN" | "CLOSED";
 
+export type AttributionScenario = {
+  scenario_key: string;
+  contributed_direction?: "LONG" | "SHORT" | "NEUTRAL";
+  contributed_confidence?: number | null;
+  timeframe?: string | null;
+  metadata?: Record<string, any>;
+};
+
 export type PriceLevel = {
   value: number | null;
   label: string;
