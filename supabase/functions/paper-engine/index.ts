@@ -185,8 +185,9 @@ function buildDuplicateKey(symbol: string, side: string, timeframe: string, hori
 }
 
 async function cancelDuplicatePositions(duplicateKey: string, keepId?: string) {
+  // Only cancel PENDING_ENTRY duplicates — never cancel OPEN (filled) positions
   const { data: dupes } = await supabase.from("paper_positions").select("id")
-    .eq("duplicate_key", duplicateKey).in("status", ["PENDING_ENTRY", "OPEN"]).order("created_at", { ascending: false });
+    .eq("duplicate_key", duplicateKey).eq("status", "PENDING_ENTRY").order("created_at", { ascending: false });
   if (!dupes?.length) return 0;
   const idsToCancel = dupes.filter((d: any) => d.id !== keepId).map((d: any) => d.id);
   if (idsToCancel.length === 0) return 0;
