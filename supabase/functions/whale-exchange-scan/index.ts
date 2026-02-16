@@ -93,7 +93,7 @@ serve(async (req) => {
   }
 
   const runId = await logRunStart("exchange", { invoked_by: "http", at: new Date().toISOString() });
-  const baseUrl = Deno.env.get("EXCHANGE_BASE_URL") ?? "https://api.binance.com";
+  const baseUrl = Deno.env.get("EXCHANGE_BASE_URL") ?? "https://data-api.binance.vision";
 
   try {
     const assets = await getEnabledAssets();
