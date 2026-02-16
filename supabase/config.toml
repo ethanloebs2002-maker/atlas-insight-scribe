@@ -35,3 +35,18 @@ verify_jwt = false
 
 [functions.whale-onchain-scan]
 verify_jwt = false
+
+[functions.market-context-snap]
+verify_jwt = false
+
+[functions.derivatives-context-snap]
+verify_jwt = false
+
+[functions.execution-cost-snap]
+verify_jwt = false
+
+[functions.scenario-reputation-update]
+verify_jwt = false
+
+[functions.health-check]
+verify_jwt = false
