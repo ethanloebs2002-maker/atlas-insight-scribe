@@ -328,14 +328,26 @@ serve(async (req) => {
         fetchCryptoCompareOHLCV(symbol, 100, tf),
       ]);
 
-      if (!markets.length || !klines.length) {
+      if (!klines.length) {
         return new Response(
-          JSON.stringify({ error: "Could not fetch data for " + symbol, marketsCount: markets.length, klinesCount: klines.length }),
+          JSON.stringify({ error: "Could not fetch kline data for " + symbol }),
           { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
-      const analysis = generateAnalysis(klines, markets[0]);
+      // Fallback: derive market data from klines if market API fails
+      const market: MarketData = markets.length ? markets[0] : {
+        symbol: symbol.toUpperCase(),
+        name: COIN_NAMES[symbol.toUpperCase()] || symbol.toUpperCase(),
+        price: klines[klines.length - 1].close,
+        change24h: klines.length >= 2
+          ? ((klines[klines.length - 1].close - klines[0].close) / klines[0].close) * 100
+          : 0,
+        volume24h: klines.reduce((s, k) => s + k.volume, 0),
+        marketCap: 0,
+      };
+
+      const analysis = generateAnalysis(klines, market);
       return new Response(JSON.stringify({ data: analysis, source: "cryptocompare", timestamp: Date.now() }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
