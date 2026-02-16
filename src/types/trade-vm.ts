@@ -54,6 +54,14 @@ export type TradeVM = {
     outcome?: "TP" | "SL" | "EXPIRY" | "CANCELED" | null;
   };
 
+  /** Derived scenario resolution window */
+  resolutionWindow?: {
+    minMinutes: number;
+    maxMinutes: number;
+    label: string;           // e.g. "4–12h"
+    derivedFrom: string;     // e.g. "1h × TRENDING × LONG"
+  };
+
   debug?: {
     entrySourceReason: string;
     gating?: Record<string, any>;
