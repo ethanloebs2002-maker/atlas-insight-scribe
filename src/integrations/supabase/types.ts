@@ -3339,6 +3339,29 @@ export type Database = {
         }
         Relationships: []
       }
+      v_whale_trade_outcome_analysis: {
+        Row: {
+          closed_at: string | null
+          exchange_inflow_24h_count: number | null
+          exchange_outflow_24h_count: number | null
+          flow_bias_24h: number | null
+          last_event_notional_usd: number | null
+          last_event_severity: number | null
+          last_event_source: string | null
+          last_event_time: string | null
+          last_event_type: string | null
+          opened_at: string | null
+          realized_pnl: number | null
+          symbol: string | null
+          trade_id: string | null
+          win: number | null
+          window_1h_count: number | null
+          window_24h_count: number | null
+          window_24h_severity_sum: number | null
+          window_6h_count: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       compute_transfer_decay: {
