@@ -191,12 +191,21 @@ async function cancelDuplicatePositions(duplicateKey: string, keepId?: string) {
   if (!dupes?.length) return 0;
   const idsToCancel = dupes.filter((d: any) => d.id !== keepId).map((d: any) => d.id);
   if (idsToCancel.length === 0) return 0;
+  let canceledCount = 0;
   for (const id of idsToCancel) {
-    await supabase.from("paper_positions").update({ status: "CANCELED", close_reason: "CANCELED", closed_at: new Date().toISOString() }).eq("id", id);
-    await supabase.from("paper_orders").update({ status: "CANCELED" }).eq("position_id", id).in("status", ["NEW", "PARTIAL"]);
-    await emitEvent(null, "POSITION", id, "POSITION_CANCELED", { reason: "duplicate_replaced" });
+    // Guard: only cancel if STILL PENDING_ENTRY (prevents race with tick filling it)
+    const { data: updated } = await supabase.from("paper_positions")
+      .update({ status: "CANCELED", close_reason: "CANCELED", closed_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("status", "PENDING_ENTRY")
+      .select("id");
+    if (updated?.length) {
+      await supabase.from("paper_orders").update({ status: "CANCELED" }).eq("position_id", id).in("status", ["NEW", "PARTIAL"]);
+      await emitEvent(null, "POSITION", id, "POSITION_CANCELED", { reason: "duplicate_replaced" });
+      canceledCount++;
+    }
   }
-  return idsToCancel.length;
+  return canceledCount;
 }
 
 // ─── EMIT DECISION (GUARANTEED) ──────────────────────────────────
