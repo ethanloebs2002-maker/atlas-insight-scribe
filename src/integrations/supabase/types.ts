@@ -1079,6 +1079,104 @@ export type Database = {
         }
         Relationships: []
       }
+      market_context_snapshots: {
+        Row: {
+          ask_depth_usd: number | null
+          atr_1h: number | null
+          atr_4h: number | null
+          best_ask: number | null
+          best_bid: number | null
+          bid_depth_usd: number | null
+          created_at: string
+          decision_id: string | null
+          depth_concentration: number | null
+          id: string
+          iv_proxy: number | null
+          iv_rv_spread: number | null
+          metadata: Json
+          mid_price: number | null
+          ob_imbalance: number | null
+          rv_1h: number | null
+          rv_24h: number | null
+          rv_4h: number | null
+          session_detail: string
+          session_primary: string
+          session_utc_hour: number
+          snapshot_time: string
+          spread_abs: number | null
+          spread_bps: number | null
+          symbol: string
+          trade_id: string | null
+          vol_regime: string | null
+        }
+        Insert: {
+          ask_depth_usd?: number | null
+          atr_1h?: number | null
+          atr_4h?: number | null
+          best_ask?: number | null
+          best_bid?: number | null
+          bid_depth_usd?: number | null
+          created_at?: string
+          decision_id?: string | null
+          depth_concentration?: number | null
+          id?: string
+          iv_proxy?: number | null
+          iv_rv_spread?: number | null
+          metadata?: Json
+          mid_price?: number | null
+          ob_imbalance?: number | null
+          rv_1h?: number | null
+          rv_24h?: number | null
+          rv_4h?: number | null
+          session_detail: string
+          session_primary: string
+          session_utc_hour: number
+          snapshot_time: string
+          spread_abs?: number | null
+          spread_bps?: number | null
+          symbol: string
+          trade_id?: string | null
+          vol_regime?: string | null
+        }
+        Update: {
+          ask_depth_usd?: number | null
+          atr_1h?: number | null
+          atr_4h?: number | null
+          best_ask?: number | null
+          best_bid?: number | null
+          bid_depth_usd?: number | null
+          created_at?: string
+          decision_id?: string | null
+          depth_concentration?: number | null
+          id?: string
+          iv_proxy?: number | null
+          iv_rv_spread?: number | null
+          metadata?: Json
+          mid_price?: number | null
+          ob_imbalance?: number | null
+          rv_1h?: number | null
+          rv_24h?: number | null
+          rv_4h?: number | null
+          session_detail?: string
+          session_primary?: string
+          session_utc_hour?: number
+          snapshot_time?: string
+          spread_abs?: number | null
+          spread_bps?: number | null
+          symbol?: string
+          trade_id?: string | null
+          vol_regime?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_context_snapshots_symbol_fkey"
+            columns: ["symbol"]
+            isOneToOne: false
+            referencedRelation: "atlas_assets"
+            referencedColumns: ["symbol"]
+          },
+        ]
+      }
       maturity_states: {
         Row: {
           asset_id: string
