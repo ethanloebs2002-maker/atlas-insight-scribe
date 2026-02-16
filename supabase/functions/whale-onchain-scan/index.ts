@@ -1,137 +1,139 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders, ELITE_CRITERIA } from "../_shared/whale.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import {
+  corsHeaders,
+  getEnabledAssets,
+  insertSignals,
+  logRunFinish,
+  logRunStart,
+  severityFromNotional,
+  type WhaleSignalInsert,
+} from "../_shared/whale.ts";
 
-const supabase = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-);
+async function fetchJson<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
+  const res = await fetch(url, { headers: { "accept": "application/json", ...headers } });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return (await res.json()) as T;
+}
 
-// ─── On-chain whale scanning ────────────────────────────────────────────
-// Scans on-chain data (DEX swaps, token transfers, LP activity) and
-// correlates with known whale wallets. Logs events for attribution.
-
-async function scanOnchainActivity(assetId: string, chain?: string) {
-  console.log(`[WHALE_ONCHAIN_SCAN] Starting for ${assetId} chain=${chain || "all"}`);
-
-  // 1. Fetch wallets with on-chain source
-  const query = supabase
-    .from("whale_wallets")
-    .select("*")
-    .eq("asset_id", assetId)
-    .eq("is_active", true);
-
-  const { data: wallets, error: wErr } = await query;
-
-  if (wErr) {
-    console.error("[WHALE_ONCHAIN_SCAN] Wallet fetch error:", wErr);
-    return { wallets_scanned: 0, events: [] };
-  }
-
-  const events: Array<Record<string, unknown>> = [];
-
-  // 2. Fetch on-chain-sourced positions
-  let posQuery = supabase
-    .from("whale_positions")
-    .select("*, whale_wallets!inner(wallet_address, lot_win_rate, label, source)")
-    .eq("asset_id", assetId)
-    .eq("status", "OPEN");
-
-  if (chain) {
-    posQuery = posQuery.eq("chain", chain);
-  }
-
-  const { data: positions } = await posQuery.order("opened_at", { ascending: false }).limit(50);
-
-  for (const pos of positions || []) {
-    const walletData = (pos as any).whale_wallets;
-    events.push({
-      asset_id: assetId,
-      event_type: "POSITION_OPEN",
-      source: "onchain",
-      whale_wallet_id: pos.whale_wallet_id,
-      direction: pos.side,
-      size_usd: pos.size_usd,
-      confidence: pos.confidence,
-      chain: pos.chain,
-      tx_hash: pos.tx_hash,
-      details_json: {
-        entry_price: pos.entry_price,
-        wallet_address: walletData?.wallet_address,
-        wallet_label: walletData?.label,
-        wallet_source: walletData?.source,
-        win_rate: walletData?.lot_win_rate,
-        chain: pos.chain,
-        tx_hash: pos.tx_hash,
-      },
-    });
-  }
-
-  // 3. Recent closures on-chain
-  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-  let closeQuery = supabase
-    .from("whale_positions")
-    .select("*, whale_wallets!inner(wallet_address, lot_win_rate, label)")
-    .eq("asset_id", assetId)
-    .eq("status", "CLOSED")
-    .gte("closed_at", cutoff);
-
-  if (chain) {
-    closeQuery = closeQuery.eq("chain", chain);
-  }
-
-  const { data: closedPositions } = await closeQuery.order("closed_at", { ascending: false }).limit(20);
-
-  for (const pos of closedPositions || []) {
-    events.push({
-      asset_id: assetId,
-      event_type: "POSITION_CLOSE",
-      source: "onchain",
-      whale_wallet_id: pos.whale_wallet_id,
-      direction: pos.side,
-      size_usd: pos.size_usd,
-      confidence: pos.confidence,
-      chain: pos.chain,
-      tx_hash: pos.tx_hash,
-      details_json: {
-        entry_price: pos.entry_price,
-        exit_price: pos.exit_price,
-        pnl_usd: pos.pnl_usd,
-        hold_time_hours: pos.hold_time_hours,
-      },
-    });
-  }
-
-  // 4. Persist events
-  if (events.length > 0) {
-    const { error: insertErr } = await supabase
-      .from("whale_watch_events")
-      .insert(events);
-    if (insertErr) console.error("[WHALE_ONCHAIN_SCAN] Insert error:", insertErr);
-  }
-
-  // 5. Log scan summary
-  await supabase.from("whale_watch_events").insert({
-    asset_id: assetId,
-    event_type: "SCAN",
-    source: "onchain",
-    chain: chain || null,
-    details_json: {
-      wallets_total: wallets?.length || 0,
-      open_positions: positions?.length || 0,
-      closed_48h: closedPositions?.length || 0,
-      events_logged: events.length,
-      chain: chain || "all",
-    },
+async function postJson<T>(url: string, body: any, headers: Record<string, string> = {}): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", "accept": "application/json", ...headers },
+    body: JSON.stringify(body),
   });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return (await res.json()) as T;
+}
 
-  console.log(`[WHALE_ONCHAIN_SCAN] Done: ${events.length} events`);
+async function whaleAlertScan(opts: {
+  apiKey: string;
+  baseUrl: string;
+  minUsdBySymbol: Record<string, number>;
+}): Promise<WhaleSignalInsert[]> {
+  const { apiKey, baseUrl, minUsdBySymbol } = opts;
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 10 * 60;
+  const url = `${baseUrl}/transactions?api_key=${encodeURIComponent(apiKey)}&start=${start}`;
 
-  return {
-    wallets_scanned: wallets?.length || 0,
-    open_positions: positions?.length || 0,
-    events_logged: events.length,
-  };
+  const data = await fetchJson<any>(url);
+  const txs: any[] = data?.transactions ?? data?.result ?? [];
+
+  const out: WhaleSignalInsert[] = [];
+  for (const t of txs) {
+    const symbol = String(t.symbol ?? t.currency ?? "").toUpperCase();
+    if (!symbol || !(symbol in minUsdBySymbol)) continue;
+
+    const notional = Number(t.amount_usd ?? t.usd_amount ?? 0);
+    const minUsd = minUsdBySymbol[symbol] ?? 1_000_000;
+    if (!(notional >= minUsd)) continue;
+
+    const chain = String(t.blockchain ?? t.chain ?? "").toLowerCase() || null;
+    const ts = Number(t.timestamp ?? t.time ?? now) * 1000;
+
+    out.push({
+      symbol,
+      source: "onchain",
+      chain,
+      signal_type: "LARGE_TRANSFER",
+      event_time: new Date(ts).toISOString(),
+      observed_price: null,
+      notional_usd: notional,
+      severity: severityFromNotional(notional, minUsd),
+      from_entity: t.from?.owner ?? t.from?.address ?? null,
+      to_entity: t.to?.owner ?? t.to?.address ?? null,
+      metadata: {
+        provider: "whale_alert",
+        txid: t.txid ?? t.hash ?? null,
+        from: t.from ?? null,
+        to: t.to ?? null,
+        raw: t,
+      },
+    });
+  }
+  return out;
+}
+
+async function bitqueryScan(opts: {
+  apiKey: string;
+  baseUrl: string;
+  assets: { symbol: string; chain: string; contract?: string | null; minUsd: number }[];
+}): Promise<WhaleSignalInsert[]> {
+  const { apiKey, baseUrl, assets } = opts;
+  const out: WhaleSignalInsert[] = [];
+
+  for (const a of assets) {
+    const query = `
+      query WhaleTransfers($since: ISO8601DateTime!, $minUsd: Float!, $contract: String) {
+        transfers: ethereumTransfers(
+          since: $since,
+          minUsd: $minUsd,
+          contract: $contract
+        ) {
+          timestamp
+          amountUsd
+          hash
+          from { address }
+          to { address }
+        }
+      }
+    `;
+
+    const sinceIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const variables = { since: sinceIso, minUsd: a.minUsd, contract: a.contract ?? null };
+
+    let res: any;
+    try {
+      res = await postJson<any>(
+        baseUrl,
+        { query, variables },
+        { "X-API-KEY": apiKey, "Authorization": `Bearer ${apiKey}` },
+      );
+    } catch {
+      continue;
+    }
+
+    const transfers: any[] = res?.data?.transfers ?? [];
+    for (const t of transfers) {
+      const notional = Number(t.amountUsd ?? 0);
+      if (!(notional >= a.minUsd)) continue;
+
+      out.push({
+        symbol: a.symbol,
+        source: "onchain",
+        chain: a.chain,
+        signal_type: "LARGE_TRANSFER",
+        event_time: new Date(t.timestamp).toISOString(),
+        observed_price: null,
+        notional_usd: notional,
+        severity: severityFromNotional(notional, a.minUsd),
+        from_entity: t.from?.address ?? null,
+        to_entity: t.to?.address ?? null,
+        metadata: { provider: "bitquery", hash: t.hash ?? null, raw: t },
+      });
+    }
+  }
+
+  return out;
 }
 
 serve(async (req) => {
@@ -139,22 +141,56 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const runId = await logRunStart("onchain", { invoked_by: "http", at: new Date().toISOString() });
+
   try {
-    const url = new URL(req.url);
-    const asset = url.searchParams.get("asset");
-    const chain = url.searchParams.get("chain") || undefined;
+    const assets = await getEnabledAssets();
 
-    if (!asset) throw new Error("asset parameter required");
+    const minUsdBySymbol: Record<string, number> = {};
+    for (const a of assets) minUsdBySymbol[a.symbol] = Number(a.whale_min_usd_onchain);
 
-    const result = await scanOnchainActivity(asset, chain);
-    return new Response(JSON.stringify({ data: result }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const whaleAlertKey = Deno.env.get("WHALE_ALERT_API_KEY") ?? "";
+    const whaleAlertBase = Deno.env.get("WHALE_ALERT_BASE_URL") ?? "";
+
+    const bitqueryKey = Deno.env.get("BITQUERY_API_KEY") ?? "";
+    const bitqueryBase = Deno.env.get("BITQUERY_BASE_URL") ?? "";
+
+    const signals: WhaleSignalInsert[] = [];
+    const meta: any = { providers: {} };
+
+    if (whaleAlertKey && whaleAlertBase) {
+      const s = await whaleAlertScan({ apiKey: whaleAlertKey, baseUrl: whaleAlertBase, minUsdBySymbol });
+      signals.push(...s.filter((x) => minUsdBySymbol[x.symbol] !== undefined));
+      meta.providers.whale_alert = { ok: true };
+    } else {
+      meta.providers.whale_alert = { ok: false, reason: "Missing WHALE_ALERT_API_KEY or WHALE_ALERT_BASE_URL" };
+    }
+
+    if (bitqueryKey && bitqueryBase) {
+      const bqAssets = assets.map((a) => ({
+        symbol: a.symbol,
+        chain: a.chain,
+        contract: a.contract_address,
+        minUsd: Number(a.whale_min_usd_onchain),
+      }));
+      const s = await bitqueryScan({ apiKey: bitqueryKey, baseUrl: bitqueryBase, assets: bqAssets });
+      signals.push(...s);
+      meta.providers.bitquery = { ok: true };
+    } else {
+      meta.providers.bitquery = { ok: false, reason: "Missing BITQUERY_API_KEY or BITQUERY_BASE_URL" };
+    }
+
+    const emitted = await insertSignals(signals);
+    await logRunFinish(runId, "OK", emitted, undefined, meta);
+
+    return new Response(JSON.stringify({ ok: true, emitted, meta }), {
+      headers: { ...corsHeaders, "content-type": "application/json" },
     });
-  } catch (err) {
-    console.error("[WHALE_ONCHAIN_SCAN] Error:", err);
-    return new Response(JSON.stringify({ error: (err as Error).message }), {
+  } catch (e) {
+    await logRunFinish(runId, "ERROR", 0, String((e as Error)?.message ?? e), {});
+    return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message ?? e) }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "content-type": "application/json" },
     });
   }
 });
