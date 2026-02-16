@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { usePaperStats } from "@/hooks/use-paper-engine";
-import { asProbability } from "@/types/probability";
+import { buildTradeVM } from "@/lib/build-trade-vm";
+import type { TradeVM } from "@/types/trade-vm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,8 @@ import EvaluateButton from "@/components/EvaluateButton";
 import RunAnalysisEmptyState from "@/components/RunAnalysisEmptyState";
 import BestTimeframeBadge from "@/components/BestTimeframeBadge";
 import TimeframePerformancePanel from "@/components/TimeframePerformancePanel";
-import DetailPanel, { type SelectedItem } from "@/components/paper-trades/DetailPanel";
+import TradeDetailPanel from "@/components/paper-trades/TradeDetailPanel";
+import TradeListRow from "@/components/paper-trades/TradeListRow";
 import EngineTimeline from "@/components/paper-trades/EngineTimeline";
 import EngineDiagnostics from "@/components/paper-trades/EngineDiagnostics";
 import { useIncorporatedAssets, runAutoEvalTick } from "@/hooks/use-auto-eval";
@@ -42,7 +44,7 @@ export default function PaperTrades() {
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [paused, setPaused] = useState(false);
   const [showLearning, setShowLearning] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
+  const [selectedVmId, setSelectedVmId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [debugProb, setDebugProb] = useState(false);
@@ -65,112 +67,98 @@ export default function PaperTrades() {
   const engineEvents = stats?.events || [];
   const config = stats?.config || { publicHorizons: ["6m", "1y", "3y", "5y"], learningHorizons: ["3m", "6m", "1y", "3y", "5y"], cadenceMap: {} };
 
-  // Deduplicate active trades
-  const deduplicatedActive = (() => {
-    const active = trades.filter((t: any) => t.status === "OPEN" || t.status === "PENDING");
-    const byKey = new Map<string, any>();
-    for (const t of active) {
-      const key = t.duplicate_key || t.id;
-      const existing = byKey.get(key);
-      if (!existing || new Date(t.created_at) > new Date(existing.created_at)) {
-        byKey.set(key, t);
-      }
+  // ─── BUILD VIEW MODELS ────────────────────────────────────────
+  // Index positions by decision_id for fast lookup
+  const positionsByDecisionId = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const t of trades) {
+      if (t.decision_id) map.set(t.decision_id, t);
     }
-    return Array.from(byKey.values());
-  })();
+    return map;
+  }, [trades]);
 
-  const openTrades = deduplicatedActive.filter((t: any) => t.status === "OPEN");
-  const pendingTrades = deduplicatedActive.filter((t: any) => t.status === "PENDING");
-  const TERMINAL_STATUSES = ["CLOSED", "CANCELED_DEDUPE", "CANCELED_LIMIT", "ERROR", "CLOSED_TIME", "CLOSED_TP", "CLOSED_SL"];
-  const closedTrades = trades.filter((t: any) => TERMINAL_STATUSES.includes(t.status));
+  const allVMs: TradeVM[] = useMemo(() => {
+    return decisions.map((d: any) => {
+      const pos = positionsByDecisionId.get(d.id) ?? null;
+      return buildTradeVM(d, pos);
+    });
+  }, [decisions, positionsByDecisionId]);
 
+  // Categorize VMs by status
+  const proposedVMs = useMemo(() => allVMs.filter(vm => vm.status === "PROPOSED"), [allVMs]);
+  const pendingVMs = useMemo(() => allVMs.filter(vm => vm.status === "PENDING_ENTRY"), [allVMs]);
+  const openVMs = useMemo(() => allVMs.filter(vm => vm.status === "OPEN"), [allVMs]);
+  const closedVMs = useMemo(() => allVMs.filter(vm => vm.status === "CLOSED"), [allVMs]);
+  const activeVMs = useMemo(() => [...openVMs, ...pendingVMs], [openVMs, pendingVMs]);
+
+  // Selected VM
+  const selectedVM = useMemo(() => allVMs.find(vm => vm.id === selectedVmId) ?? null, [allVMs, selectedVmId]);
+
+  // Stats derived from VMs
   const evaluatedDecisions = decisions.filter((d: any) => d.evaluated_at);
   const correctDecisions = evaluatedDecisions.filter((d: any) => d.correct);
   const dirAcc = evaluatedDecisions.length > 0 ? (correctDecisions.length / evaluatedDecisions.length * 100) : 0;
-  const closedReturns = closedTrades.filter((t: any) => t.return_r !== null).map((t: any) => t.return_r);
-  const avgR = closedReturns.length > 0 ? closedReturns.reduce((a: number, b: number) => a + b, 0) / closedReturns.length : 0;
-  const sortedR = [...closedReturns].sort((a: number, b: number) => a - b);
+  const closedReturns = closedVMs.filter(vm => vm.performance?.realizedR != null).map(vm => vm.performance!.realizedR!);
+  const avgR = closedReturns.length > 0 ? closedReturns.reduce((a, b) => a + b, 0) / closedReturns.length : 0;
+  const sortedR = [...closedReturns].sort((a, b) => a - b);
   const medianR = sortedR.length > 0 ? sortedR[Math.floor(sortedR.length / 2)] : 0;
-  const wins = closedTrades.filter((t: any) => t.outcome_label === "WIN").length;
-  const losses = closedTrades.filter((t: any) => t.outcome_label === "LOSS").length;
+  const wins = closedVMs.filter(vm => vm.performance?.outcome === "TP").length;
+  const losses = closedVMs.filter(vm => vm.performance?.outcome === "SL").length;
   const visibleHorizons = showLearning ? config.learningHorizons : config.publicHorizons;
 
   // Filter by search
-  const filterBySearch = (items: any[], field = "asset_id") =>
-    searchQuery ? items.filter((i: any) => i[field]?.toLowerCase().includes(searchQuery.toLowerCase())) : items;
+  const filterVMs = (vms: TradeVM[]) =>
+    searchQuery ? vms.filter(vm => vm.symbol.toLowerCase().includes(searchQuery.toLowerCase())) : vms;
 
-  const selectItem = (item: SelectedItem) => {
-    setSelectedItem(item);
+  const selectVM = (vm: TradeVM) => {
+    setSelectedVmId(vm.id);
     if (isMobile) setMobileDetailOpen(true);
   };
 
-  const isSelected = (id: string) => selectedItem?.id === id;
-
   return (
     <div className="flex flex-col h-full min-w-0 overflow-hidden">
-      {/* System Status */}
       <SystemStatusBanner asset={selectedAsset} />
 
       {/* ─── STICKY COMMAND BAR ────────────────────────────── */}
       <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-2 min-w-0">
-          {/* Left: Title */}
           <div className="flex items-center gap-2 min-w-0 shrink-0">
             <h1 className="text-sm font-mono font-bold tracking-wider text-primary truncate">PAPER TRADES</h1>
             <BestTimeframeBadge asset={selectedAsset} />
           </div>
-
           <div className="flex-1" />
-
-          {/* Right: Controls */}
           <div className="flex items-center gap-1.5 shrink-0">
             <Select value={selectedAsset || "all"} onValueChange={(v) => setSelectedAsset(v === "all" ? undefined : v)}>
-              <SelectTrigger className="w-24 h-7 text-[10px] font-mono">
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger className="w-24 h-7 text-[10px] font-mono"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Assets</SelectItem>
                 {ASSETS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
               </SelectContent>
             </Select>
-
             <div className="hidden sm:flex items-center gap-1">
               <Gauge className="h-3 w-3 text-muted-foreground" />
               <Select value={sched.cadence} onValueChange={(v) => sched.setCadence(v as EvalCadence)}>
-                <SelectTrigger className="w-20 h-7 text-[10px] font-mono">
-                  <SelectValue />
-                </SelectTrigger>
+                <SelectTrigger className="w-20 h-7 text-[10px] font-mono"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {CADENCE_OPTIONS.map(o => (
-                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                  ))}
+                  {CADENCE_OPTIONS.map(o => (<SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>))}
                 </SelectContent>
               </Select>
             </div>
-
             <Button variant="outline" size="sm" className="h-7 text-[10px] font-mono gap-1 hidden sm:flex" onClick={() => setPaused(!paused)}>
               {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
               {paused ? "Resume" : "Pause"}
             </Button>
-
             <EvaluateButton selectedAsset={selectedAsset} />
-
-            {/* More menu for overflow controls */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </Button>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="font-mono text-xs">
                 <DropdownMenuItem className="gap-2 sm:hidden" onClick={() => setPaused(!paused)}>
                   {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
                   {paused ? "Resume" : "Pause"}
                 </DropdownMenuItem>
-                <DropdownMenuItem className="gap-2">
-                  <Download className="h-3 w-3" />
-                  Export
-                </DropdownMenuItem>
+                <DropdownMenuItem className="gap-2"><Download className="h-3 w-3" />Export</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -185,8 +173,8 @@ export default function PaperTrades() {
         <SummaryCard label="Total Decisions" value={decisions.length} icon={<Target className="h-3 w-3" />} />
         <SummaryCard label="Dir. Accuracy" value={`${dirAcc.toFixed(1)}%`} icon={<TrendingUp className="h-3 w-3" />} accent={dirAcc >= 65} />
         <SummaryCard label="Avg R" value={avgR.toFixed(3)} icon={<TrendingUp className="h-3 w-3" />} accent={avgR > 0} />
-        <SummaryCard label="Win Rate" value={closedTrades.length > 0 ? `${((wins / closedTrades.length) * 100).toFixed(1)}%` : "—"} icon={<CheckCircle2 className="h-3 w-3" />} />
-        <SummaryCard label="Open / Pending" value={`${openTrades.length} / ${pendingTrades.length}`} icon={<Shield className="h-3 w-3" />} />
+        <SummaryCard label="Win Rate" value={closedVMs.length > 0 ? `${((wins / closedVMs.length) * 100).toFixed(1)}%` : "—"} icon={<CheckCircle2 className="h-3 w-3" />} />
+        <SummaryCard label="Open / Pending" value={`${openVMs.length} / ${pendingVMs.length}`} icon={<Shield className="h-3 w-3" />} />
       </div>
 
       {/* ─── MAIN CONTENT ───────────────────────────────────── */}
@@ -195,8 +183,8 @@ export default function PaperTrades() {
           <div className="w-full overflow-x-auto">
             <TabsList className="font-mono text-[10px] bg-secondary inline-flex w-max">
               <TabsTrigger value="decisions" className="text-[10px]">Decisions</TabsTrigger>
-              <TabsTrigger value="open" className="text-[10px]">Open ({openTrades.length + pendingTrades.length})</TabsTrigger>
-              <TabsTrigger value="closed" className="text-[10px]">Closed ({closedTrades.length})</TabsTrigger>
+              <TabsTrigger value="open" className="text-[10px]">Open ({activeVMs.length})</TabsTrigger>
+              <TabsTrigger value="closed" className="text-[10px]">Closed ({closedVMs.length})</TabsTrigger>
               <TabsTrigger value="health" className="text-[10px]">Health</TabsTrigger>
               <TabsTrigger value="graduation" className="text-[10px]">Graduation</TabsTrigger>
               <TabsTrigger value="bh-learning" className="text-[10px] gap-1"><Zap className="h-3 w-3" />B&H</TabsTrigger>
@@ -212,136 +200,46 @@ export default function PaperTrades() {
             </TabsList>
           </div>
 
-          {/* ─── DECISIONS (two-column) ─────────────────────── */}
+          {/* ─── DECISIONS ─────────────────────────────────── */}
           <TabsContent value="decisions" className="flex-1 min-h-0 mt-3">
-            {decisions.length === 0 ? (
+            {allVMs.length === 0 ? (
               <RunAnalysisEmptyState selectedAsset={selectedAsset} timeframe="4h" />
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 h-full min-w-0">
-                {/* Left: compact list */}
-                <div className="lg:col-span-5 min-w-0 flex flex-col">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Input
-                      placeholder="Search asset..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="h-7 text-[10px] font-mono flex-1"
-                    />
-                    <label className="flex items-center gap-1 shrink-0 cursor-pointer select-none">
-                      <Switch checked={debugProb} onCheckedChange={setDebugProb} className="h-4 w-8 [&>span]:h-3 [&>span]:w-3" />
-                      <span className="text-[9px] font-mono text-muted-foreground">Debug Prob</span>
-                    </label>
-                  </div>
-                  <ScrollArea className="flex-1 max-h-[calc(100vh-320px)]">
-                    <div className="space-y-1 pr-2">
-                      {filterBySearch(decisions).slice(0, 100).map((d: any) => (
-                        <DecisionRow
-                          key={d.id}
-                          d={d}
-                          selected={isSelected(d.id)}
-                          debugProb={debugProb}
-                          onClick={() => selectItem({
-                            kind: "decision", id: d.id, asset_id: d.asset_id, timeframe: d.timeframe || "4h",
-                            horizon: d.horizon, direction_pred: d.direction_pred, probability_pred: d.probability_pred,
-                            ref_price: d.ref_price, agreement_score: d.agreement_score, consensus_score: d.consensus_score,
-                            realized_dir: d.realized_dir, correct: d.correct, evaluated_at: d.evaluated_at,
-                            emitted_by: d.emitted_by, emit_run_id: d.emit_run_id, emitted_at: d.emitted_at,
-                            ts: d.ts, evidence_snapshot_json: d.evidence_snapshot_json,
-                          })}
-                        />
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </div>
-                {/* Right: detail panel (desktop) */}
-                {!isMobile && (
-                  <div className="lg:col-span-7 min-w-0 hidden lg:block">
-                    <Card className="h-full">
-                      <CardContent className="p-4 h-full overflow-auto">
-                        <DetailPanel item={selectedItem?.kind === "decision" ? selectedItem : null} />
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
-              </div>
+              <TwoColumnLayout
+                vms={filterVMs(allVMs).slice(0, 100)}
+                selectedId={selectedVmId}
+                onSelect={selectVM}
+                selectedVM={selectedVM}
+                isMobile={isMobile}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                showSearch
+              />
             )}
           </TabsContent>
 
-          {/* ─── OPEN TRADES (two-column) ────────────────────── */}
+          {/* ─── OPEN TRADES ──────────────────────────────── */}
           <TabsContent value="open" className="flex-1 min-h-0 mt-3">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 h-full min-w-0">
-              <div className="lg:col-span-5 min-w-0 flex flex-col">
-                <ScrollArea className="flex-1 max-h-[calc(100vh-300px)]">
-                  <div className="space-y-1 pr-2">
-                    {[...openTrades, ...pendingTrades].length === 0 ? (
-                      <div className="text-center text-xs text-muted-foreground py-8 font-mono">No open trades.</div>
-                    ) : filterBySearch([...openTrades, ...pendingTrades]).map((t: any) => (
-                      <TradeRow
-                        key={t.id}
-                        t={t}
-                        variant="open"
-                        selected={isSelected(t.id)}
-                        onClick={() => selectItem({
-                          kind: "open", id: t.id, asset_id: t.asset_id, timeframe: t.timeframe || "4h",
-                          status: t.status, scenario_type: t.scenario_type, fill_price: t.fill_price,
-                          entry_zone_low: t.entry_zone_low, entry_zone_high: t.entry_zone_high,
-                          stop_level: t.stop_level, targets_json: t.targets_json, regime_label: t.regime_label,
-                          time_window_end: t.time_window_end,
-                        })}
-                      />
-                    ))}
-                  </div>
-                </ScrollArea>
-              </div>
-              {!isMobile && (
-                <div className="lg:col-span-7 min-w-0 hidden lg:block">
-                  <Card className="h-full">
-                    <CardContent className="p-4 h-full overflow-auto">
-                      <DetailPanel item={selectedItem?.kind === "open" ? selectedItem : null} />
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </div>
+            <TwoColumnLayout
+              vms={filterVMs(activeVMs)}
+              selectedId={selectedVmId}
+              onSelect={selectVM}
+              selectedVM={selectedVM}
+              isMobile={isMobile}
+              emptyMessage="No open trades."
+            />
           </TabsContent>
 
-          {/* ─── CLOSED TRADES (two-column) ──────────────────── */}
+          {/* ─── CLOSED TRADES ────────────────────────────── */}
           <TabsContent value="closed" className="flex-1 min-h-0 mt-3">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 h-full min-w-0">
-              <div className="lg:col-span-5 min-w-0 flex flex-col">
-                <ScrollArea className="flex-1 max-h-[calc(100vh-300px)]">
-                  <div className="space-y-1 pr-2">
-                    {closedTrades.length === 0 ? (
-                      <div className="text-center text-xs text-muted-foreground py-8 font-mono">No closed trades yet.</div>
-                    ) : filterBySearch(closedTrades).map((t: any) => (
-                      <TradeRow
-                        key={t.id}
-                        t={t}
-                        variant="closed"
-                        selected={isSelected(t.id)}
-                        onClick={() => selectItem({
-                          kind: "closed", id: t.id, asset_id: t.asset_id, timeframe: t.timeframe || "4h",
-                          status: t.status, scenario_type: t.scenario_type, fill_price: t.fill_price,
-                          entry_zone_low: t.entry_zone_low, entry_zone_high: t.entry_zone_high,
-                          stop_level: t.stop_level, targets_json: t.targets_json, regime_label: t.regime_label,
-                          return_r: t.return_r, return_pct: t.return_pct, outcome_label: t.outcome_label,
-                          close_reason: t.close_reason, exit_price: t.exit_price,
-                        })}
-                      />
-                    ))}
-                  </div>
-                </ScrollArea>
-              </div>
-              {!isMobile && (
-                <div className="lg:col-span-7 min-w-0 hidden lg:block">
-                  <Card className="h-full">
-                    <CardContent className="p-4 h-full overflow-auto">
-                      <DetailPanel item={selectedItem?.kind === "closed" ? selectedItem : null} />
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </div>
+            <TwoColumnLayout
+              vms={filterVMs(closedVMs)}
+              selectedId={selectedVmId}
+              onSelect={selectVM}
+              selectedVM={selectedVM}
+              isMobile={isMobile}
+              emptyMessage="No closed trades yet."
+            />
           </TabsContent>
 
           {/* ─── LEARNING HEALTH ─────────────────────────────── */}
@@ -381,9 +279,9 @@ export default function PaperTrades() {
                 <CardContent className="space-y-4">
                   <MetricRow label="Average Return R" value={avgR.toFixed(4)} positive={avgR > 0} />
                   <MetricRow label="Median R" value={medianR.toFixed(4)} positive={medianR > 0} />
-                  <MetricRow label="Win Rate" value={closedTrades.length > 0 ? `${((wins / closedTrades.length) * 100).toFixed(1)}%` : "—"} positive={wins > losses} />
+                  <MetricRow label="Win Rate" value={closedVMs.length > 0 ? `${((wins / closedVMs.length) * 100).toFixed(1)}%` : "—"} positive={wins > losses} />
                   <MetricRow label="W / L" value={`${wins} / ${losses}`} positive={wins > losses} />
-                  <MetricRow label="Total Closed" value={String(closedTrades.length)} />
+                  <MetricRow label="Total Closed" value={String(closedVMs.length)} />
                   <MetricRow label="Directional Accuracy" value={`${dirAcc.toFixed(1)}%`} positive={dirAcc >= 65} />
                 </CardContent>
               </Card>
@@ -542,7 +440,7 @@ export default function PaperTrades() {
           </SheetHeader>
           <ScrollArea className="h-[calc(100vh-60px)]">
             <div className="p-4">
-              <DetailPanel item={selectedItem} />
+              <TradeDetailPanel vm={selectedVM} />
             </div>
           </ScrollArea>
         </SheetContent>
@@ -551,145 +449,60 @@ export default function PaperTrades() {
   );
 }
 
-// ─── COMPACT LIST ROW COMPONENTS ────────────────────────────────
-
-function DecisionRow({ d, selected, onClick, debugProb = false }: { d: any; selected: boolean; onClick: () => void; debugProb?: boolean }) {
-  const probValue = Number(d.probability_pred);
-  const isBug = !Number.isFinite(probValue) || probValue > 1 || probValue < 0;
-
-  if (isBug) {
-    console.error(`[PROB BUG] Decision ${d.id}: probability_pred=${d.probability_pred}, source=${d.probability_source || "unknown"}`);
-  }
-
-  const probDisplay = isBug ? String(d.probability_pred) : (probValue * 100).toFixed(2);
-
+// ─── TWO COLUMN LAYOUT ──────────────────────────────────────────
+function TwoColumnLayout({
+  vms, selectedId, onSelect, selectedVM, isMobile, emptyMessage, searchQuery, onSearchChange, showSearch,
+}: {
+  vms: TradeVM[];
+  selectedId: string | null;
+  onSelect: (vm: TradeVM) => void;
+  selectedVM: TradeVM | null;
+  isMobile: boolean;
+  emptyMessage?: string;
+  searchQuery?: string;
+  onSearchChange?: (v: string) => void;
+  showSearch?: boolean;
+}) {
   return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left rounded-md border p-2.5 transition-colors cursor-pointer ${
-        selected ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/50"
-      }`}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[10px] font-mono font-bold shrink-0">{d.asset_id}</span>
-        <DirBadge dir={d.direction_pred} />
-        {isBug ? (
-          <Badge variant="destructive" className="text-[8px] font-mono">PROB BUG {probDisplay}</Badge>
-        ) : (
-          <span className="text-[10px] font-mono font-bold">{probDisplay}%</span>
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 h-full min-w-0">
+      <div className="lg:col-span-5 min-w-0 flex flex-col">
+        {showSearch && onSearchChange && (
+          <div className="mb-2">
+            <Input
+              placeholder="Search asset..."
+              value={searchQuery ?? ""}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="h-7 text-[10px] font-mono"
+            />
+          </div>
         )}
-        <div className="flex-1" />
-        {d.correct != null && (
-          d.correct
-            ? <CheckCircle2 className="h-3 w-3 text-bullish shrink-0" />
-            : <XCircle className="h-3 w-3 text-bearish shrink-0" />
-        )}
-        <Badge variant="outline" className="text-[8px] font-mono shrink-0">{d.emitted_by || "?"}</Badge>
-      </div>
-      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-        <Badge variant="secondary" className="text-[8px] font-mono py-0 h-4">{d.timeframe || "4h"}</Badge>
-        <Badge variant="secondary" className="text-[8px] font-mono py-0 h-4">{d.horizon}</Badge>
-        {debugProb && (
-          <>
-            <Badge variant="outline" className="text-[8px] font-mono py-0 h-4 border-primary/30 text-primary">
-              RAW {d.probability_raw != null ? Number(d.probability_raw).toFixed(4) : "—"}
-            </Badge>
-            <Badge variant="outline" className="text-[8px] font-mono py-0 h-4 border-primary/30 text-primary">
-              SRC {d.probability_source || "—"}
-            </Badge>
-            {d.probability_components && typeof d.probability_components === "object" && (
-              <div className="w-full mt-1 rounded border border-primary/20 bg-primary/5 p-1.5 space-y-0.5">
-                {Object.entries(d.probability_components as Record<string, unknown>).map(([k, v]) => (
-                  <div key={k} className="flex justify-between text-[8px] font-mono">
-                    <span className="text-muted-foreground">{k}</span>
-                    <span className="text-primary font-bold">
-                      {typeof v === "number" ? (Number.isInteger(v) ? v : Number(v).toFixed(4)) : String(v ?? "—")}
-                    </span>
-                  </div>
-                ))}
+        <ScrollArea className="flex-1 max-h-[calc(100vh-320px)]">
+          <div className="space-y-1 pr-2">
+            {vms.length === 0 ? (
+              <div className="text-center text-xs text-muted-foreground py-8 font-mono">
+                {emptyMessage ?? "No items."}
               </div>
-            )}
-          </>
-        )}
-        <span className="text-[9px] font-mono text-muted-foreground ml-auto truncate">
-          {new Date(d.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-        </span>
+            ) : vms.map(vm => (
+              <TradeListRow
+                key={vm.id}
+                vm={vm}
+                selected={vm.id === selectedId}
+                onClick={() => onSelect(vm)}
+              />
+            ))}
+          </div>
+        </ScrollArea>
       </div>
-    </button>
-  );
-}
-
-function TradeRow({ t, variant, selected, onClick }: { t: any; variant: "open" | "closed"; selected: boolean; onClick: () => void }) {
-  const fillPrice = t.fill_price ? Number(t.fill_price) : null;
-  const stopLevel = Number(t.stop_level);
-  const tradeTargets: number[] = Array.isArray(t.targets_json)
-    ? t.targets_json.map((tp: any) => Number(tp.price ?? tp)).filter((n: number) => !isNaN(n) && n > 0)
-    : [];
-  const tpSummary = tradeTargets.length > 0
-    ? tradeTargets.map((tp, i) => `TP${i + 1} ${tp.toLocaleString()}`).join(" | ")
-    : "—";
-
-  return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left rounded-md border p-2.5 transition-colors cursor-pointer ${
-        selected ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/50"
-      }`}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[10px] font-mono font-bold shrink-0">{t.asset_id}</span>
-        <DirectionBadge scenarioType={t.scenario_type} />
-        <ScenarioBadge type={t.scenario_type} />
-        {variant === "open" && (
-          <Badge variant={t.status === "OPEN" ? "default" : "secondary"} className="text-[8px] font-mono py-0 h-4">
-            {t.status}
-          </Badge>
-        )}
-        {variant === "closed" && t.outcome_label && (
-          <OutcomeBadge outcome={t.outcome_label} />
-        )}
-        <div className="flex-1" />
-        {variant === "closed" && t.return_r != null && (
-          <span className={`text-[10px] font-mono font-bold ${Number(t.return_r) >= 0 ? "text-bullish" : "text-bearish"}`}>
-            {Number(t.return_r).toFixed(3)}R
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-1.5 mt-1 text-[9px] font-mono text-muted-foreground flex-wrap">
-        {variant === "open" && (
-          <>
-            <span>{fillPrice ? `Fill $${fillPrice.toLocaleString()}` : "Pending fill"}</span>
-            <span className="text-muted-foreground/40">•</span>
-            <span className="text-bearish">SL {stopLevel.toLocaleString()}</span>
-            <span className="text-muted-foreground/40">•</span>
-            <span className="truncate">{tpSummary}</span>
-            {typeof t.initial_probability_pred === "number" && (
-              <>
-                <span className="text-muted-foreground/40">•</span>
-                <span className="text-primary font-bold">P0 {(t.initial_probability_pred * 100).toFixed(2)}%</span>
-              </>
-            )}
-          </>
-        )}
-        {variant === "closed" && (
-          <>
-            {fillPrice && <span>Entry ${fillPrice.toLocaleString()}</span>}
-            {t.exit_price && (
-              <>
-                <span className="text-muted-foreground/40">→</span>
-                <span>Exit ${Number(t.exit_price).toLocaleString()}</span>
-              </>
-            )}
-            {t.close_reason && (
-              <>
-                <span className="text-muted-foreground/40">•</span>
-                <span className="truncate max-w-[120px]">{t.close_reason}</span>
-              </>
-            )}
-          </>
-        )}
-      </div>
-    </button>
+      {!isMobile && (
+        <div className="lg:col-span-7 min-w-0 hidden lg:block">
+          <Card className="h-full">
+            <CardContent className="p-4 h-full overflow-auto">
+              <TradeDetailPanel vm={selectedVM} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -705,10 +518,8 @@ function FastFeedbackCard({ stats }: { stats: any }) {
       </Card>
     );
   }
-
   const dirAccPct = stats.evaluatedDecisions > 0 ? (stats.dirAcc * 100).toFixed(1) : "—";
   const passesL1 = stats.dirAcc >= 0.62 && Number(stats.avgReturnR) > 0 && stats.totalDecisions >= 40;
-
   return (
     <Card className="border-primary/20 overflow-hidden">
       <CardHeader className="py-3 px-4 bg-primary/5">
@@ -757,30 +568,6 @@ function SummaryCard({ label, value, icon, accent }: { label: string; value: str
       <div className={`text-base font-mono font-bold ${accent ? "text-primary" : ""}`}>{value}</div>
     </Card>
   );
-}
-
-function DirBadge({ dir }: { dir: string }) {
-  const cls = dir === "UP" ? "bg-bullish/10 text-bullish border-bullish" : dir === "DOWN" ? "bg-bearish/10 text-bearish border-bearish" : "bg-neutral-signal/10 text-neutral-signal border-neutral-signal";
-  return <Badge variant="outline" className={`text-[9px] font-mono ${cls}`}>{dir}</Badge>;
-}
-
-function ScenarioBadge({ type }: { type: string }) {
-  const cls = type === "bullish" ? "text-bullish" : type === "bearish" ? "text-bearish" : "text-neutral-signal";
-  return <span className={`text-[9px] font-mono font-bold uppercase ${cls}`}>{type}</span>;
-}
-
-function DirectionBadge({ scenarioType }: { scenarioType: string }) {
-  const isLong = scenarioType === "bullish";
-  const label = isLong ? "LONG" : "SHORT";
-  const cls = isLong
-    ? "bg-bullish/10 text-bullish border-bullish"
-    : "bg-bearish/10 text-bearish border-bearish";
-  return <Badge variant="outline" className={`text-[8px] font-mono py-0 h-4 ${cls}`}>{label}</Badge>;
-}
-
-function OutcomeBadge({ outcome }: { outcome: string }) {
-  const map: Record<string, string> = { WIN: "bg-bullish/10 text-bullish", LOSS: "bg-bearish/10 text-bearish", BREAKEVEN: "bg-secondary text-muted-foreground" };
-  return <Badge variant="outline" className={`text-[8px] font-mono ${map[outcome] || ""}`}>{outcome}</Badge>;
 }
 
 function MetricRow({ label, value, positive }: { label: string; value: string; positive?: boolean }) {

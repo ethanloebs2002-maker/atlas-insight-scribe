@@ -3,7 +3,7 @@ export type UIStatus = "PROPOSED" | "PENDING_ENTRY" | "OPEN" | "CLOSED";
 export type PriceLevel = {
   value: number | null;
   label: string;
-  source: "DECISION" | "POSITION" | "ORDER" | "FILL";
+  source: "DECISION" | "POSITION" | "ORDER" | "FILL" | "MARKET";
   kind: "ENTRY" | "TP" | "SL" | "LIVE" | "EXIT";
   style: "solid" | "dashed" | "ghost";
 };

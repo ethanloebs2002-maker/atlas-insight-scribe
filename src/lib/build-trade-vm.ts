@@ -125,7 +125,7 @@ export function buildTradeVM(
   const liveLevel: PriceLevel = {
     value: livePrice ?? null,
     label: "Live",
-    source: "ORDER",
+    source: "MARKET",
     kind: "LIVE",
     style: livePrice != null ? "solid" : "ghost",
   };
