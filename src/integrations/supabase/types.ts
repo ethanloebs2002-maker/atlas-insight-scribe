@@ -2915,6 +2915,87 @@ export type Database = {
         }
         Relationships: []
       }
+      trade_scenario_attribution: {
+        Row: {
+          contributed_confidence: number | null
+          contributed_direction: string | null
+          created_at: string
+          decision_id: string | null
+          id: string
+          metadata: Json
+          position_id: string
+          regime: string | null
+          scenario_key: string
+          session_primary: string | null
+          symbol: string
+          timeframe: string | null
+        }
+        Insert: {
+          contributed_confidence?: number | null
+          contributed_direction?: string | null
+          created_at?: string
+          decision_id?: string | null
+          id?: string
+          metadata?: Json
+          position_id: string
+          regime?: string | null
+          scenario_key: string
+          session_primary?: string | null
+          symbol: string
+          timeframe?: string | null
+        }
+        Update: {
+          contributed_confidence?: number | null
+          contributed_direction?: string | null
+          created_at?: string
+          decision_id?: string | null
+          id?: string
+          metadata?: Json
+          position_id?: string
+          regime?: string | null
+          scenario_key?: string
+          session_primary?: string | null
+          symbol?: string
+          timeframe?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_scenario_attribution_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_scenario_attribution_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "paper_positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_scenario_attribution_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_atlas_v3_trade_entry_context"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "trade_scenario_attribution_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_market_context_trade_outcome"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "trade_scenario_attribution_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_whale_trade_outcome_analysis"
+            referencedColumns: ["trade_id"]
+          },
+        ]
+      }
       transfer_priors: {
         Row: {
           atr_sizing_json: Json | null
