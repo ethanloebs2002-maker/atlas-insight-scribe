@@ -6,6 +6,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { insertAttributionForPosition } from "../_shared/attribution_insert.ts";
+import { defaultMaxHoldMs } from "../_shared/closedloop.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -803,6 +804,80 @@ class PaperEngineCore {
     }
   }
 
+  // ─── Stage 7b: Time-stop for OPEN positions past max hold ─────────
+
+  async handleTimeStops() {
+    const { data: openPos } = await this.sb
+      .from("paper_positions")
+      .select("id, decision_id, symbol, side, filled_at, created_at, entry_price, qty, stop_price, tp_price, timeframe")
+      .eq("symbol", this.symbol)
+      .eq("status", "OPEN")
+      .limit(500);
+
+    if (!openPos?.length) return;
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const svcKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const nowMs = new Date(this.candle.ts).getTime();
+
+    for (const pos of openPos) {
+      const openedAt = pos.filled_at ?? pos.created_at;
+      const maxHold = defaultMaxHoldMs(pos.timeframe ?? this.timeframe);
+      const timeStopMs = new Date(openedAt).getTime() + maxHold;
+
+      if (nowMs < timeStopMs) continue;
+
+      // Close at current candle close
+      const exitPrice = this.candle.close;
+      const entryPrice = Number(pos.entry_price ?? exitPrice);
+      const qty = Number(pos.qty ?? 1);
+      const side = pos.side as string;
+      const pnl = side === "LONG"
+        ? (exitPrice - entryPrice) * qty
+        : (entryPrice - exitPrice) * qty;
+
+      await this.sb.from("paper_positions").update({
+        status: "CLOSED",
+        closed_at: this.candle.ts,
+        exit_price: exitPrice,
+        close_reason: "TIME_STOP",
+        realized_pnl: pnl,
+      }).eq("id", pos.id);
+
+      // Mark decision
+      if (pos.decision_id) {
+        await this.sb.from("paper_decisions")
+          .update({ engine_status: "COMPLETE" })
+          .eq("id", pos.decision_id);
+      }
+
+      // Learning ledger
+      await this.sb.from("learning_ledger").upsert({
+        position_id: pos.id,
+        decision_id: pos.decision_id ?? null,
+        asset_id: pos.symbol,
+        outcome_type: "CLOSED_TIME",
+        realized_pnl: pnl,
+        scenario_keys: [],
+        metadata: { close_reason: "TIME_STOP", max_hold_ms: maxHold, candle_ts: this.candle.ts },
+      }, { onConflict: "position_id" });
+
+      // Reputation update (non-blocking)
+      fetch(`${supabaseUrl}/functions/v1/scenario-reputation-update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${svcKey}` },
+        body: JSON.stringify({ position_id: pos.id, outcome_type: "CLOSED_TIME", realized_pnl: pnl }),
+      }).catch(e => console.warn("[time-stop] reputation update failed:", e.message));
+
+      await this.emit("POSITION", pos.id, "POSITION_CLOSED", {
+        close_reason: "TIME_STOP",
+        exit_price: exitPrice,
+        realized_pnl: pnl,
+        max_hold_ms: maxHold,
+      });
+    }
+  }
+
   // ─── Stage 8: Invariant checks ──────────────────────────────────────
 
   async checkInvariants() {
@@ -882,6 +957,7 @@ async function runSingleTick(
   await engine.matchFills();
   await engine.evalBrackets();
   await engine.handleExpiries();
+  await engine.handleTimeStops();
   await engine.checkInvariants();
   const stats = {
     decisions_evaluated: approved.length + rejected.length,
