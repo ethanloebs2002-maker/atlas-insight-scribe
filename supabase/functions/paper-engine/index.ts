@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { insertWhaleContextSnapshot } from "../_shared/whale-context.ts";
 import { buildAttributionPayload } from "../_shared/attribution.ts";
+import { defaultEntryTtlMs, isoPlusMs } from "../_shared/closedloop.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -443,8 +444,9 @@ async function emitDecision(
           const stopLevel = stopLoss.level;
           const tpLevel = targets[targets.length - 1]?.price;
           const duplicateKey = buildDuplicateKey(assetId, side, timeframe, horizon);
-          const expiryMinutes = getExpiryMinutes(policy, timeframe);
+          const entryTtlMs = (decision.data as any).metadata?.entry_ttl_ms ?? defaultEntryTtlMs(timeframe);
           const latencyMs = policy?.latency_ms || 250;
+          const decidedAt = decision.data.emitted_at ?? decision.data.ts ?? new Date().toISOString();
 
           const { data: position } = await supabase.from("paper_positions").insert({
             run_id: runId, policy_id: policy?.id, decision_id: decision.data.id,
@@ -452,8 +454,8 @@ async function emitDecision(
             stop_price: stopLevel, tp_price: tpLevel,
             initial_probability_pred: policyProbability, initial_probability_source: isFallback ? "consensus_authority" : "indicator-engine",
             regime_label: best.regime || "Unknown", duplicate_key: duplicateKey,
-            expires_at: new Date(Date.now() + expiryMinutes * 60_000).toISOString(),
-            meta: { run_id: runId, entry_zone: { low: entryLow, high: entryHigh }, consensusAuthorityUsed: isFallback && consensusAuthority, syntheticLevels },
+            expires_at: isoPlusMs(decidedAt, entryTtlMs),
+            meta: { run_id: runId, entry_zone: { low: entryLow, high: entryHigh }, consensusAuthorityUsed: isFallback && consensusAuthority, syntheticLevels, entry_ttl_ms: entryTtlMs },
           }).select().single();
 
           if (position) {
