@@ -84,6 +84,30 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
         )}
       </div>
 
+      {/* TP / SL summary strip — always visible for non-PROPOSED trades */}
+      {vm.status !== "PROPOSED" && (vm.prices.tp != null || vm.prices.sl != null) && (
+        <div className="flex items-center gap-3 text-[10px] font-mono">
+          <div className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">Entry</span>
+            <span className="font-bold">{fmtPrice(vm.prices.filledEntry ?? vm.prices.plannedEntry)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">TP</span>
+            <span className="font-bold text-bullish">{fmtPrice(vm.prices.tp)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">SL</span>
+            <span className="font-bold text-bearish">{fmtPrice(vm.prices.sl)}</span>
+          </div>
+          {vm.prices.live != null && (
+            <div className="flex items-center gap-1.5 ml-auto">
+              <span className="text-muted-foreground">Live</span>
+              <span className="font-bold text-primary">{fmtPrice(vm.prices.live)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Tabbed content */}
       <Tabs defaultValue="chart" className="min-w-0">
         <TabsList className="font-mono text-[10px] bg-secondary">
