@@ -3430,6 +3430,25 @@ export type Database = {
         }
         Relationships: []
       }
+      v_market_context_trade_outcome: {
+        Row: {
+          closed_at: string | null
+          depth_concentration: number | null
+          ob_imbalance: number | null
+          opened_at: string | null
+          realized_pnl_usd: number | null
+          rv_1h: number | null
+          rv_24h: number | null
+          session_detail: string | null
+          session_primary: string | null
+          spread_bps: number | null
+          symbol: string | null
+          trade_id: string | null
+          vol_regime: string | null
+          win: number | null
+        }
+        Relationships: []
+      }
       v_paper_exposure: {
         Row: {
           open_positions: number | null
