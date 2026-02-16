@@ -230,6 +230,51 @@ export type Database = {
         }
         Relationships: []
       }
+      atlas_assets: {
+        Row: {
+          asset_type: string
+          chain: string
+          contract_address: string | null
+          created_at: string
+          decimals: number | null
+          enabled: boolean
+          metadata: Json
+          name: string
+          symbol: string
+          updated_at: string
+          whale_min_usd_exchange: number
+          whale_min_usd_onchain: number
+        }
+        Insert: {
+          asset_type: string
+          chain: string
+          contract_address?: string | null
+          created_at?: string
+          decimals?: number | null
+          enabled?: boolean
+          metadata?: Json
+          name: string
+          symbol: string
+          updated_at?: string
+          whale_min_usd_exchange?: number
+          whale_min_usd_onchain?: number
+        }
+        Update: {
+          asset_type?: string
+          chain?: string
+          contract_address?: string | null
+          created_at?: string
+          decimals?: number | null
+          enabled?: boolean
+          metadata?: Json
+          name?: string
+          symbol?: string
+          updated_at?: string
+          whale_min_usd_exchange?: number
+          whale_min_usd_onchain?: number
+        }
+        Relationships: []
+      }
       atlas_settings: {
         Row: {
           eval_cadence_ms: number
@@ -2699,6 +2744,39 @@ export type Database = {
         }
         Relationships: []
       }
+      whale_engine_runs: {
+        Row: {
+          engine: string
+          error: string | null
+          finished_at: string | null
+          id: string
+          metadata: Json
+          signals_emitted: number
+          started_at: string
+          status: string
+        }
+        Insert: {
+          engine: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          metadata?: Json
+          signals_emitted?: number
+          started_at?: string
+          status?: string
+        }
+        Update: {
+          engine?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          metadata?: Json
+          signals_emitted?: number
+          started_at?: string
+          status?: string
+        }
+        Relationships: []
+      }
       whale_positions: {
         Row: {
           asset_id: string
@@ -2776,6 +2854,60 @@ export type Database = {
           },
         ]
       }
+      whale_positions_v2: {
+        Row: {
+          chain: string | null
+          closed_at: string | null
+          confidence: number
+          created_at: string
+          direction: string
+          id: string
+          metadata: Json
+          opened_at: string
+          symbol: string
+          wallet_id: string | null
+        }
+        Insert: {
+          chain?: string | null
+          closed_at?: string | null
+          confidence?: number
+          created_at?: string
+          direction: string
+          id?: string
+          metadata?: Json
+          opened_at: string
+          symbol: string
+          wallet_id?: string | null
+        }
+        Update: {
+          chain?: string | null
+          closed_at?: string | null
+          confidence?: number
+          created_at?: string
+          direction?: string
+          id?: string
+          metadata?: Json
+          opened_at?: string
+          symbol?: string
+          wallet_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whale_positions_v2_symbol_fkey"
+            columns: ["symbol"]
+            isOneToOne: false
+            referencedRelation: "atlas_assets"
+            referencedColumns: ["symbol"]
+          },
+          {
+            foreignKeyName: "whale_positions_v2_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "whale_wallets_v2"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       whale_signals: {
         Row: {
           asset_id: string
@@ -2832,6 +2964,62 @@ export type Database = {
           whale_count?: number
         }
         Relationships: []
+      }
+      whale_signals_v2: {
+        Row: {
+          chain: string | null
+          created_at: string
+          event_time: string
+          from_entity: string | null
+          id: string
+          metadata: Json
+          notional_usd: number
+          observed_price: number | null
+          severity: number
+          signal_type: string
+          source: string
+          symbol: string
+          to_entity: string | null
+        }
+        Insert: {
+          chain?: string | null
+          created_at?: string
+          event_time: string
+          from_entity?: string | null
+          id?: string
+          metadata?: Json
+          notional_usd: number
+          observed_price?: number | null
+          severity?: number
+          signal_type: string
+          source: string
+          symbol: string
+          to_entity?: string | null
+        }
+        Update: {
+          chain?: string | null
+          created_at?: string
+          event_time?: string
+          from_entity?: string | null
+          id?: string
+          metadata?: Json
+          notional_usd?: number
+          observed_price?: number | null
+          severity?: number
+          signal_type?: string
+          source?: string
+          symbol?: string
+          to_entity?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whale_signals_v2_symbol_fkey"
+            columns: ["symbol"]
+            isOneToOne: false
+            referencedRelation: "atlas_assets"
+            referencedColumns: ["symbol"]
+          },
+        ]
       }
       whale_wallets: {
         Row: {
@@ -2905,6 +3093,39 @@ export type Database = {
           trade_count?: number
           updated_at?: string | null
           wallet_address?: string
+        }
+        Relationships: []
+      }
+      whale_wallets_v2: {
+        Row: {
+          address: string
+          chain: string
+          created_at: string
+          entity_type: string | null
+          id: string
+          label: string | null
+          metadata: Json
+          updated_at: string
+        }
+        Insert: {
+          address: string
+          chain: string
+          created_at?: string
+          entity_type?: string | null
+          id?: string
+          label?: string | null
+          metadata?: Json
+          updated_at?: string
+        }
+        Update: {
+          address?: string
+          chain?: string
+          created_at?: string
+          entity_type?: string | null
+          id?: string
+          label?: string | null
+          metadata?: Json
+          updated_at?: string
         }
         Relationships: []
       }
