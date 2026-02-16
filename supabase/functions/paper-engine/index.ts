@@ -92,6 +92,25 @@ async function emitEvent(runId: string | null, entityType: string, entityId: str
   } catch { /* non-critical */ }
 }
 
+// ─── CONTEXT SNAPSHOT HELPERS ────────────────────────────────────
+async function fireContextSnapshots(opts: {
+  symbol: string; position_id?: string | null; decision_id?: string | null;
+  notional_usd?: number; side?: string; includeExecCost?: boolean;
+}) {
+  const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${supabaseKey}` };
+  const base = { symbol: opts.symbol, position_id: opts.position_id ?? null, decision_id: opts.decision_id ?? null };
+  const calls: Promise<any>[] = [
+    fetch(`${supabaseUrl}/functions/v1/market-context-snap`, { method: "POST", headers, body: JSON.stringify(base) }).catch(e => console.warn("[ctx-snap] market failed:", e.message)),
+    fetch(`${supabaseUrl}/functions/v1/derivatives-context-snap`, { method: "POST", headers, body: JSON.stringify(base) }).catch(e => console.warn("[ctx-snap] deriv failed:", e.message)),
+  ];
+  if (opts.includeExecCost) {
+    calls.push(
+      fetch(`${supabaseUrl}/functions/v1/execution-cost-snap`, { method: "POST", headers, body: JSON.stringify({ ...base, notional_usd: opts.notional_usd ?? 50000, side: opts.side ?? "BUY" }) }).catch(e => console.warn("[ctx-snap] exec-cost failed:", e.message)),
+    );
+  }
+  await Promise.allSettled(calls);
+}
+
 async function getActivePolicy(): Promise<any> {
   const { data } = await supabase.from("paper_policy").select("*").eq("is_active", true).order("created_at", { ascending: false }).limit(1);
   return data?.[0] || null;
@@ -319,6 +338,11 @@ async function emitDecision(
 
       await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "TRADE_CANDIDATE", direction, probability, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
 
+      // ── Hook A: Context snapshots on decision emission ──
+      if (decision.data?.id) {
+        fireContextSnapshots({ symbol: assetId, decision_id: decision.data.id }).catch(e => console.warn("[ctx-snap] decision hook failed:", e.message));
+      }
+
       // ── CREATE POSITION + ENTRY ORDER (uses policyProbability for gating) ──
       if (decision.data) {
         const policy = await getActivePolicy();
@@ -396,6 +420,24 @@ async function emitDecision(
             await supabase.from("paper_decisions").update({ engine_status: "EXECUTING" }).eq("id", decision.data.id);
             await emitEvent(runId, "POSITION", position.id, "POSITION_CREATED", { symbol: assetId, side, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
             if (entryOrder) await emitEvent(runId, "ORDER", entryOrder.id, "ORDER_PLACED", { type: "ENTRY", limit_price: limitPrice });
+
+            // ── Hook: Populate trade_scenario_attribution ──
+            try {
+              const scenarioRows = context.scenarios.map((s: any, idx: number) => ({
+                position_id: position.id,
+                decision_id: decision.data!.id,
+                symbol: assetId,
+                timeframe,
+                scenario_key: s.type || `scenario_${idx}`,
+                contributed_direction: s.type === "bullish" ? "LONG" : s.type === "bearish" ? "SHORT" : "NEUTRAL",
+                contributed_confidence: clampProbability(s.probability ?? 0, "scenario_attribution"),
+                regime: best.regime || null,
+                metadata: { horizon, run_id: runId, evidence_count: s.evidence?.length ?? 0 },
+              }));
+              if (scenarioRows.length > 0) {
+                await supabase.from("trade_scenario_attribution").insert(scenarioRows);
+              }
+            } catch (e) { console.warn("[scenario-attribution] insert failed:", (e as Error).message); }
           }
         }
       }
@@ -508,6 +550,14 @@ async function processExecution(assetId: string) {
     filled++;
     await emitEvent(pos.run_id, "ORDER", entryOrder.id, "ORDER_FILLED", { price: effectivePrice, fee, slippage });
     await emitEvent(pos.run_id, "POSITION", pos.id, "POSITION_OPENED", { entry_price: effectivePrice, eligible_close_at: eligibleCloseAt.toISOString() });
+
+    // ── Hook B: Context snapshots on position fill ──
+    fireContextSnapshots({
+      symbol: pos.symbol, position_id: pos.id, decision_id: pos.decision_id,
+      notional_usd: effectivePrice * (pos.qty || 1), side: pos.side === "LONG" ? "BUY" : "SELL",
+      includeExecCost: true,
+    }).catch(e => console.warn("[ctx-snap] fill hook failed:", e.message));
+
     if (tpOrder) await emitEvent(pos.run_id, "ORDER", tpOrder.id, "TP_PLACED", { price: pos.tp_price });
     if (slOrder) await emitEvent(pos.run_id, "ORDER", slOrder.id, "SL_PLACED", { price: pos.stop_price });
   }
