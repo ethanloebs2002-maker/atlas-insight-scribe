@@ -1253,6 +1253,78 @@ export type Database = {
         }
         Relationships: []
       }
+      learning_ledger: {
+        Row: {
+          asset_id: string
+          created_at: string
+          decision_id: string | null
+          id: string
+          metadata: Json
+          outcome_type: string
+          position_id: string
+          realized_pnl: number | null
+          scenario_keys: string[]
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          decision_id?: string | null
+          id?: string
+          metadata?: Json
+          outcome_type: string
+          position_id: string
+          realized_pnl?: number | null
+          scenario_keys?: string[]
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          decision_id?: string | null
+          id?: string
+          metadata?: Json
+          outcome_type?: string
+          position_id?: string
+          realized_pnl?: number | null
+          scenario_keys?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "learning_ledger_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "learning_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "paper_positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "learning_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_atlas_v3_trade_entry_context"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "learning_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_market_context_trade_outcome"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "learning_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_whale_trade_outcome_analysis"
+            referencedColumns: ["trade_id"]
+          },
+        ]
+      }
       market_context_snapshots: {
         Row: {
           ask_depth_usd: number | null
@@ -2385,7 +2457,9 @@ export type Database = {
           entry_order_id: string | null
           entry_price: number | null
           exit_price: number | null
+          expired_at: string | null
           expires_at: string | null
+          expiry_reason: string | null
           filled_at: string | null
           horizon: string
           id: string
@@ -2420,7 +2494,9 @@ export type Database = {
           entry_order_id?: string | null
           entry_price?: number | null
           exit_price?: number | null
+          expired_at?: string | null
           expires_at?: string | null
+          expiry_reason?: string | null
           filled_at?: string | null
           horizon?: string
           id?: string
@@ -2455,7 +2531,9 @@ export type Database = {
           entry_order_id?: string | null
           entry_price?: number | null
           exit_price?: number | null
+          expired_at?: string | null
           expires_at?: string | null
+          expiry_reason?: string | null
           filled_at?: string | null
           horizon?: string
           id?: string
@@ -2631,6 +2709,108 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      paper_wallet_ledger: {
+        Row: {
+          amount: number
+          asset_id: string | null
+          created_at: string
+          event_type: string
+          id: string
+          metadata: Json
+          position_id: string | null
+          wallet_id: string
+        }
+        Insert: {
+          amount: number
+          asset_id?: string | null
+          created_at?: string
+          event_type: string
+          id?: string
+          metadata?: Json
+          position_id?: string | null
+          wallet_id: string
+        }
+        Update: {
+          amount?: number
+          asset_id?: string | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          metadata?: Json
+          position_id?: string | null
+          wallet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_wallet_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "paper_positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_wallet_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_atlas_v3_trade_entry_context"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "paper_wallet_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_market_context_trade_outcome"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "paper_wallet_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_whale_trade_outcome_analysis"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "paper_wallet_ledger_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "paper_wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      paper_wallets: {
+        Row: {
+          auto_topup_amount: number
+          auto_topup_enabled: boolean
+          auto_topup_threshold: number
+          balance: number
+          created_at: string
+          currency: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          auto_topup_amount?: number
+          auto_topup_enabled?: boolean
+          auto_topup_threshold?: number
+          balance?: number
+          created_at?: string
+          currency?: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          auto_topup_amount?: number
+          auto_topup_enabled?: boolean
+          auto_topup_threshold?: number
+          balance?: number
+          created_at?: string
+          currency?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       pattern_audit_log: {
         Row: {
