@@ -5,6 +5,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { insertAttributionForPosition } from "../_shared/attribution-position.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -457,6 +458,25 @@ class PaperEngineCore {
       entry_price: avgPrice,
       qty,
     });
+
+    // ── Hook B: Attribution + context snapshots on fill ──
+    if (isFirst && pos.decision_id) {
+      insertAttributionForPosition({ position_id: posId, decision_id: pos.decision_id })
+        .then(r => console.log("[attribution-fill]", posId, r))
+        .catch(e => console.warn("[attribution-fill] failed:", e.message));
+
+      // Fire context snapshots with position_id
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const svcKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${svcKey}` };
+      const base = { symbol: this.symbol, position_id: posId, decision_id: pos.decision_id };
+      const notionalUsd = avgPrice * qty;
+      Promise.allSettled([
+        fetch(`${supabaseUrl}/functions/v1/market-context-snap`, { method: "POST", headers, body: JSON.stringify(base) }),
+        fetch(`${supabaseUrl}/functions/v1/derivatives-context-snap`, { method: "POST", headers, body: JSON.stringify(base) }),
+        fetch(`${supabaseUrl}/functions/v1/execution-cost-snap`, { method: "POST", headers, body: JSON.stringify({ ...base, notional_usd: notionalUsd, side: pos.side }) }),
+      ]).catch(e => console.warn("[ctx-snap-fill] failed:", e.message));
+    }
 
     if (entryComplete) {
       await this.createBrackets(pos, avgPrice);
