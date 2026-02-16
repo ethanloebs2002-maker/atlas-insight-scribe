@@ -53,6 +53,8 @@ serve(async (req) => {
 
   const body = await req.json().catch(()=> ({}));
   const oneSymbol: string | null = body?.symbol ?? null;
+  const bodyPositionId: string | null = body?.position_id ?? null;
+  const bodyDecisionId: string | null = body?.decision_id ?? null;
 
   const { data: assets, error: aerr } = await sb
     .from("atlas_assets")
@@ -110,6 +112,8 @@ serve(async (req) => {
       session_primary: ses.primary,
       session_detail: ses.detail,
       session_utc_hour: ses.hour,
+      position_id: bodyPositionId,
+      decision_id: bodyDecisionId,
       metadata: { exchange_symbol: ex, levels }
     });
 

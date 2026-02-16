@@ -73,6 +73,8 @@ serve(async (req) => {
   const notionalUsd = Number(body?.notional_usd ?? 50_000);
   const side = (body?.side === "SELL" ? "SELL" : "BUY") as "BUY"|"SELL";
   const symbolFilter: string | null = body?.symbol ?? null;
+  const bodyPositionId: string | null = body?.position_id ?? null;
+  const bodyDecisionId: string | null = body?.decision_id ?? null;
 
   const { data: assets } = await sb.from("atlas_assets").select("symbol,metadata").eq("enabled", true);
   const targets = (assets as Asset[]).filter(a => !!a.metadata?.exchange_symbol && (!symbolFilter || a.symbol===symbolFilter));
@@ -93,6 +95,8 @@ serve(async (req) => {
       est_spread_bps: est.spreadBps,
       est_total_cost_bps: Number.isFinite(total) ? total : null,
       liquidity_thin: est.thin,
+      position_id: bodyPositionId,
+      decision_id: bodyDecisionId,
       metadata: { exchange_symbol: ex, side }
     });
     if (!error) written++;

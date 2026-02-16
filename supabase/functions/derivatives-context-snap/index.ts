@@ -23,6 +23,8 @@ serve(async (req) => {
 
   const body = await req.json().catch(()=> ({}));
   const oneSymbol: string | null = body?.symbol ?? null;
+  const bodyPositionId: string | null = body?.position_id ?? null;
+  const bodyDecisionId: string | null = body?.decision_id ?? null;
 
   const { data: assets, error: aerr } = await sb.from("atlas_assets").select("symbol,enabled,metadata").eq("enabled", true);
   if (aerr) return new Response(JSON.stringify({ ok:false, error:aerr.message }), { status: 500, headers: corsHeaders });
@@ -45,6 +47,8 @@ serve(async (req) => {
       funding_rate: Number(fNow.fundingRate ?? 0),
       funding_rate_24h_avg: avg(histRates),
       open_interest_usd: oiUsd,
+      position_id: bodyPositionId,
+      decision_id: bodyDecisionId,
       provider: "binance_futures",
       metadata: { futures_symbol: futuresSymbol, mark_price: fNow.markPrice }
     });
