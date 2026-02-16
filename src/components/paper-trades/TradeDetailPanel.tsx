@@ -6,6 +6,7 @@ import TradeChart, { type Candle } from "@/components/paper-trades/TradeChart";
 import { useAssetAnalysis } from "@/hooks/use-crypto-data";
 import { useLivePrice } from "@/hooks/use-live-price";
 import type { TradeVM, PriceLevel } from "@/types/trade-vm";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Target, Bug, ChevronDown, BarChart3, Clock, Layers } from "lucide-react";
 import { useState, useMemo } from "react";
 
@@ -60,6 +61,21 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
         </Badge>
         <Badge variant="secondary" className="text-[9px] font-mono">{vm.timeframe}</Badge>
         <Badge variant="secondary" className="text-[9px] font-mono">{vm.horizon}</Badge>
+        {vm.resolutionWindow && (
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="text-[9px] font-mono border-dashed text-muted-foreground">
+                  ⏱ {vm.resolutionWindow.label}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-[9px] font-mono max-w-[220px]">
+                <p className="font-bold mb-0.5">Expected Resolution Window</p>
+                <p className="text-muted-foreground">Derived from: {vm.resolutionWindow.derivedFrom}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
         <span className="text-[10px] font-mono font-bold">{vm.probability.displayPct}%</span>
         {vm.probability.source !== "model" && (
           <span className="text-[8px] font-mono text-muted-foreground">({vm.probability.source})</span>

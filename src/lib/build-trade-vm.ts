@@ -1,4 +1,5 @@
 import type { TradeVM, UIStatus, PriceLevel } from "@/types/trade-vm";
+import { routeScenarioWindow } from "@/lib/horizon-router";
 
 /** Raw decision row from paper_decisions */
 interface DecisionRow {
@@ -160,6 +161,16 @@ export function buildTradeVM(
         }
       : undefined;
 
+  // --- Resolution window ---
+  const regime = decision.evidence_snapshot_json?.regime as string | undefined;
+  const scenarioWindow = routeScenarioWindow({
+    timeframe: decision.timeframe,
+    direction: side === "SHORT" ? "SHORT" : "LONG",
+    regime: (regime === "TRENDING" || regime === "CHOPPY" || regime === "TRANSITIONAL")
+      ? regime : undefined,
+  });
+  const derivedFrom = `${decision.timeframe} × ${regime ?? "—"} × ${side}`;
+
   return {
     id: position?.id ?? decision.id,
     decisionId: decision.id,
@@ -188,6 +199,12 @@ export function buildTradeVM(
       sl: slLevel,
       live: liveLevel,
       ...(exitLevel ? { exit: exitLevel } : {}),
+    },
+    resolutionWindow: {
+      minMinutes: scenarioWindow.minMinutes,
+      maxMinutes: scenarioWindow.maxMinutes,
+      label: scenarioWindow.label,
+      derivedFrom,
     },
     performance,
     debug: {

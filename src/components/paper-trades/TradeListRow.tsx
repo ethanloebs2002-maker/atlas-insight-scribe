@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { TradeVM } from "@/types/trade-vm";
 
 /** Formats a price as $X,XXX or — if null */
@@ -85,6 +86,21 @@ export default function TradeListRow({
       <div className="flex items-center gap-1.5 mt-1 text-[9px] font-mono text-muted-foreground flex-wrap">
         <Badge variant="secondary" className="text-[8px] font-mono py-0 h-4">{vm.timeframe}</Badge>
         <Badge variant="secondary" className="text-[8px] font-mono py-0 h-4">{vm.horizon}</Badge>
+        {vm.resolutionWindow && (
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="text-[8px] font-mono py-0 h-4 text-muted-foreground border-dashed">
+                  ⏱ {vm.resolutionWindow.label}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-[9px] font-mono max-w-[200px]">
+                <p className="font-bold">Resolution Window (derived)</p>
+                <p className="text-muted-foreground">{vm.resolutionWindow.derivedFrom}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
         <span className="text-muted-foreground/40">•</span>
         <span>{entryLabel} {entryVal}</span>
         <span className="text-muted-foreground/40">•</span>
