@@ -7,7 +7,7 @@ import { useAssetAnalysis } from "@/hooks/use-crypto-data";
 import { useLivePrice } from "@/hooks/use-live-price";
 import type { TradeVM, PriceLevel } from "@/types/trade-vm";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Target, Bug, ChevronDown, BarChart3, Clock, Layers, Waves } from "lucide-react";
+import { Target, Bug, ChevronDown, BarChart3, Clock, Layers, Waves, Activity } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -91,6 +91,7 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
           <TabsTrigger value="lifecycle" className="text-[10px] gap-1"><Clock className="h-3 w-3" />Lifecycle</TabsTrigger>
           <TabsTrigger value="levels" className="text-[10px] gap-1"><Layers className="h-3 w-3" />Levels</TabsTrigger>
           <TabsTrigger value="whale" className="text-[10px] gap-1"><Waves className="h-3 w-3" />Whale</TabsTrigger>
+          <TabsTrigger value="market" className="text-[10px] gap-1"><Activity className="h-3 w-3" />Market</TabsTrigger>
         </TabsList>
 
         {/* Chart Tab */}
@@ -153,6 +154,11 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
         {/* Whale Context Tab */}
         <TabsContent value="whale" className="mt-3">
           <WhaleContextCard tradeId={vm.id} decisionId={vm.decisionId} />
+        </TabsContent>
+
+        {/* Market Context Tab */}
+        <TabsContent value="market" className="mt-3">
+          <MarketContextCard tradeId={vm.id} decisionId={vm.decisionId} />
         </TabsContent>
       </Tabs>
 
@@ -349,5 +355,104 @@ function WhaleContextCard({ tradeId, decisionId }: { tradeId: string; decisionId
         ))}
       </CardContent>
     </Card>
+  );
+}
+
+function MarketContextCard({ tradeId, decisionId }: { tradeId: string; decisionId: string }) {
+  const { data: snapshot, isLoading } = useQuery({
+    queryKey: ["market-context", tradeId, decisionId],
+    queryFn: async () => {
+      const { data: byTrade } = await supabase
+        .from("market_context_snapshots")
+        .select("*")
+        .eq("trade_id", tradeId)
+        .order("snapshot_time", { ascending: false })
+        .limit(1);
+
+      if (byTrade && byTrade.length > 0) return byTrade[0];
+
+      const { data: byDecision } = await supabase
+        .from("market_context_snapshots")
+        .select("*")
+        .eq("decision_id", decisionId)
+        .order("snapshot_time", { ascending: false })
+        .limit(1);
+
+      return byDecision?.[0] ?? null;
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="py-4 text-center text-[10px] font-mono text-muted-foreground">
+          Loading market context…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <Card>
+        <CardContent className="py-6 text-center space-y-1">
+          <Activity className="h-5 w-5 text-muted-foreground/30 mx-auto" />
+          <p className="text-[10px] font-mono text-muted-foreground">
+            No context snapshot yet — engine has not recorded this trade's market context.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const rv1h = snapshot.rv_1h != null ? Number(snapshot.rv_1h) : null;
+  const rv24h = snapshot.rv_24h != null ? Number(snapshot.rv_24h) : null;
+  const obImb = snapshot.ob_imbalance != null ? Number(snapshot.ob_imbalance) : null;
+
+  const regimeColor =
+    snapshot.vol_regime === "expansion" ? "text-bearish" :
+    snapshot.vol_regime === "compression" ? "text-primary" : "text-foreground";
+
+  const imbLabel = obImb != null
+    ? obImb > 0.05 ? "bid dominant" : obImb < -0.05 ? "ask dominant" : "balanced"
+    : "";
+
+  return (
+    <Card>
+      <CardHeader className="py-2 px-3">
+        <div>
+          <CardTitle className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Activity className="h-3 w-3" />
+            Market Context (Observed)
+          </CardTitle>
+          <p className="text-[8px] font-mono text-muted-foreground/60 mt-0.5">
+            Captured at entry · Does not affect decisions yet
+          </p>
+        </div>
+      </CardHeader>
+      <CardContent className="px-3 pb-3 space-y-1.5">
+        <MctxRow label="Spread" value={snapshot.spread_bps != null ? `${Number(snapshot.spread_bps).toFixed(1)} bps` : "—"} />
+        <MctxRow
+          label="OB imbalance"
+          value={obImb != null ? `${obImb.toFixed(3)} (${imbLabel})` : "—"}
+          valueColor={obImb != null && obImb > 0.05 ? "text-bullish" : obImb != null && obImb < -0.05 ? "text-bearish" : undefined}
+        />
+        <MctxRow label="Vol regime" value={snapshot.vol_regime ?? "—"} valueColor={regimeColor} />
+        <MctxRow
+          label="RV 1h vs 24h"
+          value={rv1h != null && rv24h != null ? `${(rv1h * 100).toFixed(2)}% / ${(rv24h * 100).toFixed(2)}%` : "—"}
+        />
+        <MctxRow label="Session" value={snapshot.session_detail ?? "—"} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function MctxRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <div className="flex justify-between text-[10px] font-mono">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`font-bold ${valueColor ?? "text-foreground"}`}>{value}</span>
+    </div>
   );
 }
