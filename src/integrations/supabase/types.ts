@@ -514,6 +514,65 @@ export type Database = {
         }
         Relationships: []
       }
+      derivatives_context_snapshots: {
+        Row: {
+          created_at: string
+          decision_id: string | null
+          funding_rate: number | null
+          funding_rate_24h_avg: number | null
+          id: string
+          long_short_ratio: number | null
+          metadata: Json
+          open_interest_change_1h: number | null
+          open_interest_change_24h: number | null
+          open_interest_usd: number | null
+          provider: string
+          snapshot_time: string
+          symbol: string
+          trade_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          decision_id?: string | null
+          funding_rate?: number | null
+          funding_rate_24h_avg?: number | null
+          id?: string
+          long_short_ratio?: number | null
+          metadata?: Json
+          open_interest_change_1h?: number | null
+          open_interest_change_24h?: number | null
+          open_interest_usd?: number | null
+          provider?: string
+          snapshot_time: string
+          symbol: string
+          trade_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          decision_id?: string | null
+          funding_rate?: number | null
+          funding_rate_24h_avg?: number | null
+          id?: string
+          long_short_ratio?: number | null
+          metadata?: Json
+          open_interest_change_1h?: number | null
+          open_interest_change_24h?: number | null
+          open_interest_usd?: number | null
+          provider?: string
+          snapshot_time?: string
+          symbol?: string
+          trade_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "derivatives_context_snapshots_symbol_fkey"
+            columns: ["symbol"]
+            isOneToOne: false
+            referencedRelation: "atlas_assets"
+            referencedColumns: ["symbol"]
+          },
+        ]
+      }
       epistemic_attributions: {
         Row: {
           asset_id: string
@@ -603,6 +662,59 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      execution_cost_snapshots: {
+        Row: {
+          created_at: string
+          decision_id: string | null
+          est_slippage_bps: number | null
+          est_spread_bps: number | null
+          est_total_cost_bps: number | null
+          id: string
+          liquidity_thin: boolean
+          metadata: Json
+          notional_usd: number
+          snapshot_time: string
+          symbol: string
+          trade_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          decision_id?: string | null
+          est_slippage_bps?: number | null
+          est_spread_bps?: number | null
+          est_total_cost_bps?: number | null
+          id?: string
+          liquidity_thin?: boolean
+          metadata?: Json
+          notional_usd: number
+          snapshot_time: string
+          symbol: string
+          trade_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          decision_id?: string | null
+          est_slippage_bps?: number | null
+          est_spread_bps?: number | null
+          est_total_cost_bps?: number | null
+          id?: string
+          liquidity_thin?: boolean
+          metadata?: Json
+          notional_usd?: number
+          snapshot_time?: string
+          symbol?: string
+          trade_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "execution_cost_snapshots_symbol_fkey"
+            columns: ["symbol"]
+            isOneToOne: false
+            referencedRelation: "atlas_assets"
+            referencedColumns: ["symbol"]
+          },
+        ]
       }
       global_pattern_evidence: {
         Row: {
@@ -2671,6 +2783,54 @@ export type Database = {
         }
         Relationships: []
       }
+      scenario_reputation: {
+        Row: {
+          alpha: number
+          avg_pnl_usd: number | null
+          beta: number
+          credibility: number
+          posterior_mean: number
+          regime: string
+          samples: number
+          scenario_key: string
+          sharpe_like: number | null
+          symbol: string
+          timeframe: string
+          updated_at: string
+          win_rate: number | null
+        }
+        Insert: {
+          alpha?: number
+          avg_pnl_usd?: number | null
+          beta?: number
+          credibility?: number
+          posterior_mean?: number
+          regime?: string
+          samples?: number
+          scenario_key: string
+          sharpe_like?: number | null
+          symbol?: string
+          timeframe?: string
+          updated_at?: string
+          win_rate?: number | null
+        }
+        Update: {
+          alpha?: number
+          avg_pnl_usd?: number | null
+          beta?: number
+          credibility?: number
+          posterior_mean?: number
+          regime?: string
+          samples?: number
+          scenario_key?: string
+          sharpe_like?: number | null
+          symbol?: string
+          timeframe?: string
+          updated_at?: string
+          win_rate?: number | null
+        }
+        Relationships: []
+      }
       system_status: {
         Row: {
           anomaly_halt: boolean
@@ -3427,6 +3587,29 @@ export type Database = {
           updated_at: string | null
           version_tag: string | null
           worst_case_same_candle: boolean | null
+        }
+        Relationships: []
+      }
+      v_atlas_v3_trade_entry_context: {
+        Row: {
+          closed_at: string | null
+          depth_concentration: number | null
+          est_total_cost_bps: number | null
+          funding_rate: number | null
+          liquidity_thin: boolean | null
+          ob_imbalance: number | null
+          open_interest_change_24h: number | null
+          open_interest_usd: number | null
+          opened_at: string | null
+          realized_pnl_usd: number | null
+          rv_1h: number | null
+          rv_24h: number | null
+          session_primary: string | null
+          spread_bps: number | null
+          symbol: string | null
+          trade_id: string | null
+          vol_regime: string | null
+          win: number | null
         }
         Relationships: []
       }
