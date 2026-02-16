@@ -173,6 +173,14 @@ class PaperEngineCore {
     const sl = Number(d.stop_loss);
     const tp = Number(d.take_profit);
 
+    // ── Scenario 1 Authority: use consensus_score when probability is fallback ──
+    const probComponents = d.probability_components as Record<string, unknown> | null;
+    const isFallback = probComponents?.fallbackUsed === true || prob <= 0.31;
+    const consensusScore = Number(d.consensus_score ?? 0);
+    const policyProbability = isFallback && consensusScore >= 0.4
+      ? consensusScore
+      : prob;
+
     // Direction-aware RR
     const reward =
       direction === "UP"
@@ -183,19 +191,36 @@ class PaperEngineCore {
         ? Math.abs(entry - sl)
         : Math.abs(sl - entry);
     const rr = risk > 0 ? reward / risk : 0;
-    const ev = prob * rr - (1 - prob);
+    const ev = policyProbability * rr - (1 - policyProbability);
+
+    const rejectionReasons: string[] = [];
+    const minProbPass = policyProbability >= this.policy.min_prob;
+    if (!minProbPass) rejectionReasons.push(`policy_prob ${policyProbability.toFixed(3)} < min_prob ${this.policy.min_prob}`);
+    const minRrPass = rr >= this.policy.min_rr;
+    if (!minRrPass) rejectionReasons.push(`R:R ${rr.toFixed(2)} < min_rr ${this.policy.min_rr}`);
+    const evPass = !this.policy.require_ev_positive || ev > 0;
+    if (!evPass) rejectionReasons.push(`EV ${ev.toFixed(3)} <= 0`);
+    const shortsPass = direction === "UP" || this.policy.allow_shorts;
+    if (!shortsPass) rejectionReasons.push("shorts disabled");
+    const maxOpenPass = openN < this.policy.max_open;
+    if (!maxOpenPass) rejectionReasons.push(`max_open ${openN} >= ${this.policy.max_open}`);
+    const maxPendingPass = pendingN < this.policy.max_pending;
+    if (!maxPendingPass) rejectionReasons.push(`max_pending ${pendingN} >= ${this.policy.max_pending}`);
 
     const gates = {
-      min_prob_pass: prob >= this.policy.min_prob,
-      min_rr_pass: rr >= this.policy.min_rr,
-      ev_pass: !this.policy.require_ev_positive || ev > 0,
-      shorts_pass: direction === "UP" || this.policy.allow_shorts,
-      max_open_pass: openN < this.policy.max_open,
-      max_pending_pass: pendingN < this.policy.max_pending,
+      min_prob_pass: minProbPass,
+      min_rr_pass: minRrPass,
+      ev_pass: evPass,
+      shorts_pass: shortsPass,
+      max_open_pass: maxOpenPass,
+      max_pending_pass: maxPendingPass,
       prob,
+      policyProbability,
+      consensusAuthorityUsed: isFallback && consensusScore >= 0.4,
       rr,
       ev,
       direction,
+      rejection_reasons: rejectionReasons,
     };
     const approved =
       gates.min_prob_pass &&

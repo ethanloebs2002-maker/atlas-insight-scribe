@@ -221,7 +221,7 @@ async function emitDecision(
     return { decision_type: "ERROR", decision: decision.data };
   }
 
-  // C) TRADE_CANDIDATE
+  // C) TRADE_CANDIDATE — with Scenario 1 consensus authority
   if (context.currentPrice && context.scenarios?.length > 0) {
     const best = context.scenarios[0];
     const evidence = best.evidence || [];
@@ -234,63 +234,136 @@ async function emitDecision(
     const confidence = Math.round(probability * 100);
     await checkStuckProbability(assetId, probability);
 
-    if (confidence >= 40 && direction !== "NEUTRAL") {
-      const entryZone = best.entryZones?.[0];
-      const stopLoss = best.stopLoss;
-      const targets = best.targets || [];
+    // ── Scenario 1 Authority ──────────────────────────────────────
+    // When probability is fallback-level, use consensus_score as the
+    // effective probability for gating decisions into execution.
+    const isFallback = probability <= 0.31 || confidence < 40;
+    const consensusAuthority = context.consensusScore >= 0.4;
+    const policyProbability = isFallback && consensusAuthority
+      ? context.consensusScore
+      : probability;
+    const scenarioBias = best.type || "neutral";
+    const scenarioConfidence = policyProbability;
+
+    // Accept if: original confidence >= 40, OR consensus authority applies with a direction
+    const tradable = (confidence >= 40 || (isFallback && consensusAuthority)) && direction !== "NEUTRAL";
+
+    if (tradable) {
+      // ── Synthetic entry/sl/tp when indicator doesn't provide them ──
+      let entryZone = best.entryZones?.[0];
+      let stopLoss = best.stopLoss;
+      let targets = best.targets || [];
+      const syntheticLevels = !entryZone || !stopLoss;
+
+      if (!entryZone) {
+        const offset = context.currentPrice * 0.005; // 0.5% entry zone
+        entryZone = {
+          priceRange: direction === "UP"
+            ? [context.currentPrice * 0.998, context.currentPrice * 1.003]
+            : [context.currentPrice * 0.997, context.currentPrice * 1.002],
+        };
+      }
+      if (!stopLoss) {
+        const riskPct = 0.025; // 2.5% risk
+        stopLoss = {
+          level: direction === "UP"
+            ? context.currentPrice * (1 - riskPct)
+            : context.currentPrice * (1 + riskPct),
+        };
+      }
+      if (!targets.length) {
+        const rewardPct = 0.04; // 4% reward (~1.6 R:R)
+        targets = [{
+          price: direction === "UP"
+            ? context.currentPrice * (1 + rewardPct)
+            : context.currentPrice * (1 - rewardPct),
+          label: "T1-synthetic",
+        }];
+      }
 
       const decision = await supabase.from("paper_decisions").insert({
         asset_id: assetId, timeframe, horizon, ref_price: context.currentPrice,
         direction_pred: direction, probability_pred: probability, probability_raw: rawProbability,
-        probability_source: "indicator-engine",
-        probability_components: { bestProbRaw: rawProbability, bestProbNormalized: probability, agreementScore: context.agreementScore, consensusScore: context.consensusScore, completenessScore: context.completenessScore, evidenceCount: evidence.length, fallbackUsed: false },
+        probability_source: isFallback ? "consensus_authority" : "indicator-engine",
+        probability_components: {
+          bestProbRaw: rawProbability, bestProbNormalized: probability,
+          policyProbability, scenarioBias, scenarioConfidence,
+          agreementScore: context.agreementScore, consensusScore: context.consensusScore,
+          completenessScore: context.completenessScore, evidenceCount: evidence.length,
+          fallbackUsed: isFallback, consensusAuthorityUsed: isFallback && consensusAuthority,
+          syntheticLevels,
+          source_agreement: context.agreementScore,
+          signal_agreement: context.consensusScore,
+          structure_agreement: context.completenessScore,
+          data_completeness: context.completenessScore,
+        },
         agreement_score: context.agreementScore, consensus_score: context.consensusScore, completeness_score: context.completenessScore,
+        entry_price: (entryZone.priceRange[0] + entryZone.priceRange[1]) / 2,
+        stop_loss: stopLoss.level,
+        take_profit: targets[targets.length - 1]?.price,
         evidence_snapshot_json: {
           run_id: runId, decision_type: "TRADE_CANDIDATE", direction, confidence,
           entry_zone: entryZone ? { low: entryZone.priceRange?.[0], high: entryZone.priceRange?.[1] } : null,
           stop_loss: stopLoss, targets: targets.map((t: any) => ({ price: t.price, label: t.label })),
-          rationale: `${direction} signal with ${confidence}% confidence.`,
-          gates_snapshot: { agreement: context.agreementScore, consensus: context.consensusScore, completeness: context.completenessScore, anomaly_halt: false },
+          rationale: isFallback
+            ? `${direction} signal via consensus authority (consensus=${(context.consensusScore * 100).toFixed(0)}%, prob=${confidence}%).`
+            : `${direction} signal with ${confidence}% confidence.`,
+          gates_snapshot: { agreement: context.agreementScore, consensus: context.consensusScore, completeness: context.completenessScore, anomaly_halt: false, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority },
           version_tag: VERSION_TAG,
         },
         decision_type: "TRADE_CANDIDATE", version_tag: VERSION_TAG, ...provenance,
       }).select().single();
 
-      await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "TRADE_CANDIDATE", direction, probability });
+      await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "TRADE_CANDIDATE", direction, probability, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
 
-      // ── CREATE POSITION + ENTRY ORDER ──────────────────────
-      if (entryZone && stopLoss && decision.data) {
+      // ── CREATE POSITION + ENTRY ORDER (uses policyProbability for gating) ──
+      if (decision.data) {
         const policy = await getActivePolicy();
         const side = direction === "UP" ? "LONG" : "SHORT";
+        const rejectionReasons: string[] = [];
 
-        // Policy gates
-        const policyBlockers: string[] = [];
         if (policy) {
-          if (probability < (policy.min_prob || 0.35)) policyBlockers.push(`prob ${probability.toFixed(3)} < min_prob ${policy.min_prob}`);
-          if (!policy.allow_shorts && side === "SHORT") policyBlockers.push("shorts disabled by policy");
+          if (policyProbability < (policy.min_prob || 0.35)) rejectionReasons.push(`policy_prob ${policyProbability.toFixed(3)} < min_prob ${policy.min_prob}`);
+          if (!policy.allow_shorts && side === "SHORT") rejectionReasons.push("shorts disabled by policy");
           const exposure = await getExposure();
-          if (exposure.open >= (policy.max_open || 10)) policyBlockers.push(`max_open reached: ${exposure.open}`);
-          if (exposure.pending >= (policy.max_pending || 20)) policyBlockers.push(`max_pending reached: ${exposure.pending}`);
+          if (exposure.open >= (policy.max_open || 10)) rejectionReasons.push(`max_open reached: ${exposure.open}`);
+          if (exposure.pending >= (policy.max_pending || 20)) rejectionReasons.push(`max_pending reached: ${exposure.pending}`);
 
-          const entryPrice = ((entryZone.priceRange?.[0] || context.currentPrice * 0.99) + (entryZone.priceRange?.[1] || context.currentPrice * 1.01)) / 2;
-          const stopLevel = stopLoss.level || (side === "LONG" ? entryPrice * 0.97 : entryPrice * 1.03);
-          const tpLevel = targets[targets.length - 1]?.price || (side === "LONG" ? entryPrice * 1.05 : entryPrice * 0.95);
+          const entryPrice = (entryZone.priceRange[0] + entryZone.priceRange[1]) / 2;
+          const stopLevel = stopLoss.level;
+          const tpLevel = targets[targets.length - 1]?.price;
           const riskDist = Math.abs(entryPrice - stopLevel);
           const rewardDist = Math.abs(tpLevel - entryPrice);
           const rr = riskDist > 0 ? rewardDist / riskDist : 0;
-          if (rr < (policy.min_rr || 1.2)) policyBlockers.push(`R:R ${rr.toFixed(2)} < min_rr ${policy.min_rr}`);
+          if (rr < (policy.min_rr || 1.2)) rejectionReasons.push(`R:R ${rr.toFixed(2)} < min_rr ${policy.min_rr}`);
+
+          // EV check using policyProbability
+          if (policy.require_ev_positive) {
+            const ev = policyProbability * rr - (1 - policyProbability);
+            if (ev <= 0) rejectionReasons.push(`EV ${ev.toFixed(3)} <= 0 (policy_prob=${policyProbability.toFixed(3)}, rr=${rr.toFixed(2)})`);
+          }
         }
 
-        if (policyBlockers.length > 0) {
-          await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "Position blocked by policy", { policyBlockers });
-          await emitEvent(runId, "ENGINE", null, "POSITION_BLOCKED", { decision_id: decision.data.id, blockers: policyBlockers });
+        if (rejectionReasons.length > 0) {
+          await supabase.from("paper_decisions").update({
+            engine_status: "REJECTED",
+            probability_components: {
+              ...(decision.data.probability_components as any || {}),
+              rejection_reasons: rejectionReasons,
+              gate_values: { policyProbability, min_prob: policy?.min_prob, min_rr: policy?.min_rr },
+            },
+          }).eq("id", decision.data.id);
+          await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "Position blocked by policy", { rejectionReasons, policyProbability });
+          await emitEvent(runId, "ENGINE", null, "POSITION_BLOCKED", { decision_id: decision.data.id, blockers: rejectionReasons, policyProbability });
         } else {
-          // Create position + entry order
-          const entryLow = entryZone.priceRange?.[0] || context.currentPrice * 0.99;
-          const entryHigh = entryZone.priceRange?.[1] || context.currentPrice * 1.01;
+          // APPROVED — create position + entry order
+          await supabase.from("paper_decisions").update({ engine_status: "APPROVED" }).eq("id", decision.data.id);
+
+          const entryLow = entryZone.priceRange[0];
+          const entryHigh = entryZone.priceRange[1];
           const limitPrice = side === "LONG" ? entryHigh : entryLow;
-          const stopLevel = stopLoss.level || (side === "LONG" ? context.currentPrice * 0.97 : context.currentPrice * 1.03);
-          const tpLevel = targets[targets.length - 1]?.price || (side === "LONG" ? context.currentPrice * 1.05 : context.currentPrice * 0.95);
+          const stopLevel = stopLoss.level;
+          const tpLevel = targets[targets.length - 1]?.price;
           const duplicateKey = buildDuplicateKey(assetId, side, timeframe, horizon);
           const expiryMinutes = getExpiryMinutes(policy, timeframe);
           const latencyMs = policy?.latency_ms || 250;
@@ -299,10 +372,10 @@ async function emitDecision(
             run_id: runId, policy_id: policy?.id, decision_id: decision.data.id,
             symbol: assetId, side, timeframe, horizon, status: "PENDING_ENTRY", qty: 1,
             stop_price: stopLevel, tp_price: tpLevel,
-            initial_probability_pred: probability, initial_probability_source: "indicator-engine",
+            initial_probability_pred: policyProbability, initial_probability_source: isFallback ? "consensus_authority" : "indicator-engine",
             regime_label: best.regime || "Unknown", duplicate_key: duplicateKey,
             expires_at: new Date(Date.now() + expiryMinutes * 60_000).toISOString(),
-            meta: { run_id: runId, entry_zone: { low: entryLow, high: entryHigh } },
+            meta: { run_id: runId, entry_zone: { low: entryLow, high: entryHigh }, consensusAuthorityUsed: isFallback && consensusAuthority, syntheticLevels },
           }).select().single();
 
           if (position) {
@@ -317,31 +390,35 @@ async function emitDecision(
               await supabase.from("paper_positions").update({ entry_order_id: entryOrder.id }).eq("id", position.id);
             }
             await cancelDuplicatePositions(duplicateKey, position.id);
-            await emitEvent(runId, "POSITION", position.id, "POSITION_CREATED", { symbol: assetId, side, probability });
+            await supabase.from("paper_decisions").update({ engine_status: "EXECUTING" }).eq("id", decision.data.id);
+            await emitEvent(runId, "POSITION", position.id, "POSITION_CREATED", { symbol: assetId, side, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
             if (entryOrder) await emitEvent(runId, "ORDER", entryOrder.id, "ORDER_PLACED", { type: "ENTRY", limit_price: limitPrice });
           }
         }
       }
 
-      await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "TRADE_CANDIDATE written", { id: decision.data?.id, direction, confidence });
+      await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "TRADE_CANDIDATE written", { id: decision.data?.id, direction, confidence, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
       return { decision_type: "TRADE_CANDIDATE", decision: decision.data };
     }
   }
 
-  // D) NO_TRADE fallback
+  // D) NO_TRADE fallback — only when consensus authority also insufficient
   const blockers: string[] = [];
   if (context.agreementScore < 0.5) blockers.push(`Low agreement: ${(context.agreementScore * 100).toFixed(0)}%`);
-  if (context.consensusScore < 0.5) blockers.push(`Low consensus: ${(context.consensusScore * 100).toFixed(0)}%`);
+  if (context.consensusScore < 0.4) blockers.push(`Low consensus: ${(context.consensusScore * 100).toFixed(0)}%`);
   if (context.completenessScore < 0.5) blockers.push(`Low completeness: ${(context.completenessScore * 100).toFixed(0)}%`);
   if (!context.currentPrice) blockers.push("No current price");
   if (!context.scenarios?.length) blockers.push("No scenarios");
+  const bestScenario = context.scenarios?.[0];
+  const noDirection = !bestScenario || (bestScenario.type !== "bullish" && bestScenario.type !== "bearish");
+  if (noDirection) blockers.push("No directional bias in scenarios");
   if (blockers.length === 0) blockers.push("Insufficient signal confidence");
 
   const decision = await supabase.from("paper_decisions").insert({
     asset_id: assetId, timeframe, horizon, ref_price: context.currentPrice || 0,
     direction_pred: "NEUTRAL", probability_pred: 0.3, probability_raw: 0.3,
     probability_source: "no_trade_fallback",
-    probability_components: { fallbackUsed: true, reason: "insufficient_signal", blockers },
+    probability_components: { fallbackUsed: true, reason: "insufficient_signal", blockers, consensusScore: context.consensusScore, agreementScore: context.agreementScore },
     agreement_score: context.agreementScore, consensus_score: context.consensusScore, completeness_score: context.completenessScore,
     evidence_snapshot_json: { run_id: runId, decision_type: "NO_TRADE", blockers, version_tag: VERSION_TAG },
     decision_type: "NO_TRADE", version_tag: VERSION_TAG, ...provenance,
