@@ -7,8 +7,10 @@ import { useAssetAnalysis } from "@/hooks/use-crypto-data";
 import { useLivePrice } from "@/hooks/use-live-price";
 import type { TradeVM, PriceLevel } from "@/types/trade-vm";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Target, Bug, ChevronDown, BarChart3, Clock, Layers } from "lucide-react";
+import { Target, Bug, ChevronDown, BarChart3, Clock, Layers, Waves } from "lucide-react";
 import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
 function fmtPrice(v: number | null | undefined): string {
   if (v == null) return "—";
@@ -88,6 +90,7 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
           <TabsTrigger value="chart" className="text-[10px] gap-1"><BarChart3 className="h-3 w-3" />Chart</TabsTrigger>
           <TabsTrigger value="lifecycle" className="text-[10px] gap-1"><Clock className="h-3 w-3" />Lifecycle</TabsTrigger>
           <TabsTrigger value="levels" className="text-[10px] gap-1"><Layers className="h-3 w-3" />Levels</TabsTrigger>
+          <TabsTrigger value="whale" className="text-[10px] gap-1"><Waves className="h-3 w-3" />Whale</TabsTrigger>
         </TabsList>
 
         {/* Chart Tab */}
@@ -145,6 +148,11 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Whale Context Tab */}
+        <TabsContent value="whale" className="mt-3">
+          <WhaleContextCard tradeId={vm.id} decisionId={vm.decisionId} />
         </TabsContent>
       </Tabs>
 
@@ -249,5 +257,97 @@ function ChartWithLiveData({ vm }: { vm: TradeVM }) {
       symbol={vm.symbol}
       timeframe={vm.timeframe}
     />
+  );
+}
+
+function WhaleContextCard({ tradeId, decisionId }: { tradeId: string; decisionId: string }) {
+  const { data: snapshot, isLoading } = useQuery({
+    queryKey: ["whale-context", tradeId, decisionId],
+    queryFn: async () => {
+      // Try trade_id first, fall back to decision_id
+      const { data: byTrade } = await supabase
+        .from("whale_context_snapshots")
+        .select("*")
+        .eq("trade_id", tradeId)
+        .order("snapshot_time", { ascending: false })
+        .limit(1);
+
+      if (byTrade && byTrade.length > 0) return byTrade[0];
+
+      const { data: byDecision } = await supabase
+        .from("whale_context_snapshots")
+        .select("*")
+        .eq("decision_id", decisionId)
+        .order("snapshot_time", { ascending: false })
+        .limit(1);
+
+      return byDecision?.[0] ?? null;
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="py-4 text-center text-[10px] font-mono text-muted-foreground">
+          Loading whale context…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <Card>
+        <CardContent className="py-4 text-center text-[10px] font-mono text-muted-foreground">
+          No whale context snapshot for this trade
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const rows: [string, string | number][] = [
+    ["Snapshot", fmtTime(snapshot.snapshot_time)],
+    ["1h signals", snapshot.window_1h_count],
+    ["6h signals", snapshot.window_6h_count],
+    ["24h signals", snapshot.window_24h_count],
+    ["24h severity Σ", Number(snapshot.window_24h_severity_sum).toFixed(2)],
+    ["Large trades (24h)", snapshot.large_trade_24h_count],
+    ["Volume spikes (24h)", snapshot.volume_spike_24h_count],
+    ["Large transfers (24h)", snapshot.large_transfer_24h_count],
+    ["Exchange inflows (24h)", snapshot.exchange_inflow_24h_count],
+    ["Exchange outflows (24h)", snapshot.exchange_outflow_24h_count],
+    ["Flow bias (24h)", Number(snapshot.flow_bias_24h).toFixed(3)],
+  ];
+
+  if (snapshot.last_event_type) {
+    rows.push(
+      ["Last event", `${snapshot.last_event_type} (${snapshot.last_event_source})`],
+      ["Last event $", snapshot.last_event_notional_usd != null ? `$${Number(snapshot.last_event_notional_usd).toLocaleString()}` : "—"],
+      ["Last severity", snapshot.last_event_severity != null ? Number(snapshot.last_event_severity).toFixed(3) : "—"],
+    );
+  }
+
+  const bias = Number(snapshot.flow_bias_24h);
+  const biasColor = bias > 0.1 ? "text-bullish" : bias < -0.1 ? "text-bearish" : "text-muted-foreground";
+
+  return (
+    <Card>
+      <CardHeader className="py-2 px-3">
+        <CardTitle className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+          <Waves className="h-3 w-3" />
+          Whale Context @ {fmtTime(snapshot.snapshot_time)}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="px-3 pb-3 space-y-1">
+        {rows.map(([label, val]) => (
+          <div key={label} className="flex justify-between text-[10px] font-mono">
+            <span className="text-muted-foreground">{label}</span>
+            <span className={label === "Flow bias (24h)" ? `font-bold ${biasColor}` : "text-foreground"}>
+              {val}
+            </span>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
