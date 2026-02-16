@@ -742,6 +742,9 @@ class PaperEngineCore {
 
     if (!expired?.length) return;
 
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const svcKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
     for (const pos of expired) {
       if (pos.status === "OPEN") {
         await this.closePosition(pos.id, this.candle.close, "EXPIRY");
@@ -753,6 +756,9 @@ class PaperEngineCore {
             status: "CANCELED",
             close_reason: "EXPIRED_ENTRY",
             closed_at: this.candle.ts,
+            expired_at: this.candle.ts,
+            expiry_reason: "EXPIRED_NO_FILL",
+            realized_pnl: 0,
           })
           .eq("id", pos.id);
 
@@ -764,8 +770,34 @@ class PaperEngineCore {
             .eq("id", pos.entry_order_id);
         }
 
+        // Learning ledger (idempotent via unique index)
+        await this.sb.from("learning_ledger").upsert({
+          position_id: pos.id,
+          decision_id: pos.decision_id ?? null,
+          asset_id: pos.symbol,
+          outcome_type: "EXPIRED_NO_FILL",
+          realized_pnl: 0,
+          scenario_keys: [],
+          metadata: { expiry_reason: "EXPIRED_NO_FILL", candle_ts: this.candle.ts },
+        }, { onConflict: "position_id" });
+
+        // Scenario reputation update (non-blocking)
+        fetch(`${supabaseUrl}/functions/v1/scenario-reputation-update`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${svcKey}` },
+          body: JSON.stringify({ position_id: pos.id, outcome_type: "EXPIRED_NO_FILL" }),
+        }).catch(e => console.warn("[expiry] reputation update failed:", e.message));
+
+        // Mark decision terminal
+        if (pos.decision_id) {
+          await this.sb.from("paper_decisions")
+            .update({ engine_status: "EXPIRED" })
+            .eq("id", pos.decision_id);
+        }
+
         await this.emit("POSITION", pos.id, "POSITION_EXPIRED", {
           status_when_expired: pos.status,
+          expiry_reason: "EXPIRED_NO_FILL",
         });
       }
     }
