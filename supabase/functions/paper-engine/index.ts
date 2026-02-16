@@ -350,6 +350,54 @@ async function emitDecision(
         const side = direction === "UP" ? "LONG" : "SHORT";
         const rejectionReasons: string[] = [];
 
+        // ── Market-context entry clamping ──────────────────────────
+        let entryPrice = (entryZone.priceRange[0] + entryZone.priceRange[1]) / 2;
+        {
+          const { data: mktSnap } = await supabase
+            .from("market_context_snapshots")
+            .select("mid_price, vol_regime, spread_bps")
+            .eq("symbol", assetId)
+            .order("snapshot_time", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (!mktSnap?.mid_price) {
+            rejectionReasons.push("NO_MARKET_CONTEXT");
+          } else {
+            const mid = Number(mktSnap.mid_price);
+            const volRegime = mktSnap.vol_regime as string | null;
+            const spreadBps = Number(mktSnap.spread_bps ?? 0) / 10_000; // spread_bps → fraction
+
+            const maxDistPct =
+              volRegime === "compression" ? 0.003 :
+              volRegime === "normal"      ? 0.0045 :
+                                            0.0015;
+            const minDistPct = Math.max(maxDistPct, 2 * spreadBps);
+
+            if (side === "LONG") {
+              const floor = mid * (1 - minDistPct);
+              if (entryPrice < floor) {
+                await trace(runId, assetId, timeframe, "ENTRY_CLAMP", "INFO",
+                  `LONG entry clamped from ${entryPrice.toFixed(4)} to ${floor.toFixed(4)}`,
+                  { mid, volRegime, spreadBps, minDistPct, originalEntry: entryPrice });
+                entryPrice = floor;
+              }
+            } else {
+              const ceiling = mid * (1 + minDistPct);
+              if (entryPrice > ceiling) {
+                await trace(runId, assetId, timeframe, "ENTRY_CLAMP", "INFO",
+                  `SHORT entry clamped from ${entryPrice.toFixed(4)} to ${ceiling.toFixed(4)}`,
+                  { mid, volRegime, spreadBps, minDistPct, originalEntry: entryPrice });
+                entryPrice = ceiling;
+              }
+            }
+
+            // Propagate clamped entry back to entryZone
+            const halfSpread = Math.abs(entryZone.priceRange[1] - entryZone.priceRange[0]) / 2;
+            entryZone.priceRange = [entryPrice - halfSpread, entryPrice + halfSpread];
+          }
+        }
+
         if (policy) {
           if (policyProbability < (policy.min_prob || 0.35)) rejectionReasons.push(`policy_prob ${policyProbability.toFixed(3)} < min_prob ${policy.min_prob}`);
           if (!policy.allow_shorts && side === "SHORT") rejectionReasons.push("shorts disabled by policy");
@@ -357,7 +405,6 @@ async function emitDecision(
           if (exposure.open >= (policy.max_open || 10)) rejectionReasons.push(`max_open reached: ${exposure.open}`);
           if (exposure.pending >= (policy.max_pending || 20)) rejectionReasons.push(`max_pending reached: ${exposure.pending}`);
 
-          const entryPrice = (entryZone.priceRange[0] + entryZone.priceRange[1]) / 2;
           const stopLevel = stopLoss.level;
           const tpLevel = targets[targets.length - 1]?.price;
           const riskDist = Math.abs(entryPrice - stopLevel);
@@ -384,8 +431,11 @@ async function emitDecision(
           await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "Position blocked by policy", { rejectionReasons, policyProbability });
           await emitEvent(runId, "ENGINE", null, "POSITION_BLOCKED", { decision_id: decision.data.id, blockers: rejectionReasons, policyProbability });
         } else {
-          // APPROVED — create position + entry order
-          await supabase.from("paper_decisions").update({ engine_status: "APPROVED" }).eq("id", decision.data.id);
+          // APPROVED — create position + entry order; persist clamped entry on decision
+          await supabase.from("paper_decisions").update({
+            engine_status: "APPROVED",
+            entry_price: entryPrice,
+          }).eq("id", decision.data.id);
 
           const entryLow = entryZone.priceRange[0];
           const entryHigh = entryZone.priceRange[1];
