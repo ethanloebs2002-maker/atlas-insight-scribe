@@ -395,14 +395,20 @@ class PaperEngineCore {
           ? c.low <= (order.limit_price ?? Infinity)
           : c.high >= (order.limit_price ?? 0);
       case "STOP":
-      case "STOP_LOSS":
-        return side === "LONG" || side === "BUY"
-          ? c.high >= (order.stop_price ?? Infinity)
-          : c.low <= (order.stop_price ?? 0);
-      case "TAKE_PROFIT":
-        return side === "LONG" || side === "BUY"
-          ? c.high >= (order.limit_price ?? Infinity)
-          : c.low <= (order.limit_price ?? 0);
+      case "STOP_LOSS": {
+        // For bracket exits (reduce_only), use position_side from meta to determine direction
+        const posSide = order.meta?.position_side || side;
+        return posSide === "LONG" || posSide === "BUY"
+          ? c.low <= (order.stop_price ?? 0)             // LONG SL: price drops to stop
+          : c.high >= (order.stop_price ?? Infinity);    // SHORT SL: price rises to stop
+      }
+      case "TAKE_PROFIT": {
+        // For bracket exits (reduce_only), use position_side from meta to determine direction
+        const posSide = order.meta?.position_side || side;
+        return posSide === "LONG" || posSide === "BUY"
+          ? c.high >= (order.limit_price ?? Infinity)    // LONG TP: price rises to target
+          : c.low <= (order.limit_price ?? 0);           // SHORT TP: price drops to target
+      }
       default:
         return false;
     }
@@ -522,7 +528,7 @@ class PaperEngineCore {
       oco_group_id: ocoId,
       reduce_only: true,
       position_id: pos.id,
-      meta: { bracket: "TP", entry_candle: this.candle.ts },
+      meta: { bracket: "TP", entry_candle: this.candle.ts, position_side: pos.side },
     });
 
     // SL order
@@ -541,7 +547,7 @@ class PaperEngineCore {
       oco_group_id: ocoId,
       reduce_only: true,
       position_id: pos.id,
-      meta: { bracket: "SL", entry_candle: this.candle.ts },
+      meta: { bracket: "SL", entry_candle: this.candle.ts, position_side: pos.side },
     });
 
     await this.sb
