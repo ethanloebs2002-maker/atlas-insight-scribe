@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { insertWhaleContextSnapshot } from "../_shared/whale-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -204,6 +205,7 @@ async function emitDecision(
       decision_type: "PAUSED", version_tag: VERSION_TAG, ...provenance,
     }).select().single();
     await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "PAUSED" });
+    if (decision.data?.id) insertWhaleContextSnapshot({ symbol: assetId, snapshotTimeIso: emittedAt, decisionId: decision.data.id }).catch(e => console.warn("[whale-context] PAUSED snapshot failed:", e.message));
     return { decision_type: "PAUSED", decision: decision.data };
   }
 
@@ -218,6 +220,7 @@ async function emitDecision(
       decision_type: "ERROR", version_tag: VERSION_TAG, ...provenance,
     }).select().single();
     await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "ERROR" });
+    if (decision.data?.id) insertWhaleContextSnapshot({ symbol: assetId, snapshotTimeIso: emittedAt, decisionId: decision.data.id }).catch(e => console.warn("[whale-context] ERROR snapshot failed:", e.message));
     return { decision_type: "ERROR", decision: decision.data };
   }
 
@@ -398,6 +401,7 @@ async function emitDecision(
       }
 
       await trace(runId, assetId, timeframe, "FINALIZE", "INFO", "TRADE_CANDIDATE written", { id: decision.data?.id, direction, confidence, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
+      if (decision.data?.id) insertWhaleContextSnapshot({ symbol: assetId, snapshotTimeIso: emittedAt, decisionId: decision.data.id }).catch(e => console.warn("[whale-context] TRADE_CANDIDATE snapshot failed:", e.message));
       return { decision_type: "TRADE_CANDIDATE", decision: decision.data };
     }
   }
@@ -425,6 +429,7 @@ async function emitDecision(
   }).select().single();
 
   await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "NO_TRADE", blockers });
+  if (decision.data?.id) insertWhaleContextSnapshot({ symbol: assetId, snapshotTimeIso: emittedAt, decisionId: decision.data.id }).catch(e => console.warn("[whale-context] NO_TRADE snapshot failed:", e.message));
   return { decision_type: "NO_TRADE", decision: decision.data };
 }
 
