@@ -473,7 +473,7 @@ async function emitDecision(
               run_id: runId, policy_id: policy?.id, symbol: assetId, side,
               order_type: "LIMIT", qty: 1, limit_price: limitPrice, status: "NEW",
               eligible_fill_at: new Date(Date.now() + latencyMs).toISOString(),
-              position_id: position.id, meta: { decision_id: decision.data.id },
+              position_id: position.id, meta: { decision_id: decision.data.id, entry_order: true },
             }).select().single();
 
             if (entryOrder) {
