@@ -40,7 +40,7 @@ serve(async (req) => {
     const attrib = await sb
       .from("trade_scenario_attribution")
       .select("scenario_key,symbol,timeframe,regime")
-      .eq("trade_id", t.id);
+      .eq("position_id", t.id);
 
     const rows = attrib.data ?? [];
     for (const s of rows) {
