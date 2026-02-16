@@ -1,80 +1,133 @@
-// ─── Shared whale constants & helpers ────────────────────────────────────
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-export const ELITE_CRITERIA = {
-  min_win_rate: 0.58,
-  min_trade_count: 50,
-  min_integrity_score: 0.70,
-  min_attribution_confidence: 0.75,
-  max_hold_time_hours: 72,
-  min_recent_activity_days: 30,
+// ─── Types ───────────────────────────────────────────────────────────────
+
+export type AtlasAsset = {
+  symbol: string;
+  name: string;
+  enabled: boolean;
+  asset_type: "native" | "erc20" | "spl";
+  chain: "bitcoin" | "ethereum" | "solana" | "avalanche";
+  contract_address: string | null;
+  decimals: number | null;
+  whale_min_usd_exchange: number;
+  whale_min_usd_onchain: number;
+  metadata: Record<string, any>;
 };
 
-export const TIMEFRAME_LOOKBACK: Record<string, number> = {
-  "1m": 2, "5m": 6, "15m": 12, "1h": 24, "4h": 48,
-  "24h": 168, "3d": 336, "1w": 720,
+export type WhaleSignalInsert = {
+  symbol: string;
+  source: "exchange" | "onchain";
+  chain?: string | null;
+  signal_type:
+    | "LARGE_TRADE"
+    | "VOLUME_SPIKE"
+    | "LARGE_TRANSFER"
+    | "EXCHANGE_INFLOW"
+    | "EXCHANGE_OUTFLOW";
+  event_time: string; // ISO
+  observed_price?: number | null;
+  notional_usd: number;
+  severity: number; // 0..1
+  from_entity?: string | null;
+  to_entity?: string | null;
+  metadata?: Record<string, any>;
 };
 
-export interface WhaleWallet {
-  id: string;
-  wallet_address: string;
-  asset_id: string;
-  lot_win_rate: number;
-  realized_pnl_usd: number;
-  trade_count: number;
-  avg_hold_time_hours: number | null;
-  avg_position_size_usd: number | null;
-  integrity_score: number;
-  attribution_confidence: number;
-  consistency_score: number | null;
-  is_active: boolean;
-  is_elite: boolean;
-  tier: number;
-  label: string | null;
-  source: string | null;
+// ─── Supabase client (service-role) ──────────────────────────────────────
+
+export function supabaseAdmin() {
+  const url = Deno.env.get("SUPABASE_URL")!;
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
-export interface WhalePosition {
-  id: string;
-  whale_wallet_id: string;
-  asset_id: string;
-  side: string;
-  size_usd: number;
-  entry_price: number;
-  exit_price: number | null;
-  opened_at: string;
-  closed_at: string | null;
-  status: string;
-  pnl_usd: number | null;
-  source: string | null;
-  confidence: number | null;
-  chain: string | null;
-  tx_hash: string | null;
+// ─── Engine run lifecycle ────────────────────────────────────────────────
+
+export async function logRunStart(engine: "exchange" | "onchain", metadata: any = {}) {
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from("whale_engine_runs")
+    .insert({ engine, status: "RUNNING", metadata })
+    .select("id")
+    .single();
+
+  if (error) throw new Error(`logRunStart failed: ${error.message}`);
+  return data.id as string;
 }
 
-export function isElite(w: WhaleWallet): boolean {
-  return (
-    w.lot_win_rate >= ELITE_CRITERIA.min_win_rate &&
-    w.trade_count >= ELITE_CRITERIA.min_trade_count &&
-    w.integrity_score >= ELITE_CRITERIA.min_integrity_score &&
-    w.attribution_confidence >= ELITE_CRITERIA.min_attribution_confidence &&
-    w.is_active === true
-  );
+export async function logRunFinish(
+  runId: string,
+  status: "OK" | "ERROR",
+  signalsEmitted: number,
+  errorMsg?: string,
+  metadata: any = {},
+) {
+  const sb = supabaseAdmin();
+  const { error } = await sb
+    .from("whale_engine_runs")
+    .update({
+      finished_at: new Date().toISOString(),
+      status,
+      signals_emitted: signalsEmitted,
+      error: errorMsg ?? null,
+      metadata,
+    })
+    .eq("id", runId);
+
+  if (error) throw new Error(`logRunFinish failed: ${error.message}`);
 }
 
-export function confidenceTier(c: number): "HIGH" | "MEDIUM" | "LOW" {
-  if (c >= 0.75) return "HIGH";
-  if (c >= 0.5) return "MEDIUM";
-  return "LOW";
+// ─── Asset helpers ───────────────────────────────────────────────────────
+
+export async function getEnabledAssets(): Promise<AtlasAsset[]> {
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from("atlas_assets")
+    .select("*")
+    .eq("enabled", true);
+
+  if (error) throw new Error(`getEnabledAssets failed: ${error.message}`);
+  return (data ?? []) as AtlasAsset[];
 }
 
-export function formatHoldTime(hours: number | null): string {
-  if (!hours) return "—";
-  if (hours < 1) return `${Math.round(hours * 60)}m`;
-  if (hours < 24) return `${hours.toFixed(1)}h`;
-  return `${(hours / 24).toFixed(1)}d`;
+// ─── Severity helpers ────────────────────────────────────────────────────
+
+export function clamp01(x: number) {
+  if (Number.isNaN(x)) return 0;
+  return Math.max(0, Math.min(1, x));
 }
+
+export function severityFromNotional(notionalUsd: number, minUsd: number) {
+  const ratio = notionalUsd / Math.max(1, minUsd);
+  return clamp01(Math.log2(Math.max(1, ratio)) / 2);
+}
+
+// ─── Signal insertion ────────────────────────────────────────────────────
+
+export async function insertSignals(signals: WhaleSignalInsert[]) {
+  if (!signals.length) return 0;
+  const sb = supabaseAdmin();
+
+  const rows = signals.map((s) => ({
+    ...s,
+    metadata: s.metadata ?? {},
+    chain: s.chain ?? null,
+    observed_price: s.observed_price ?? null,
+    from_entity: s.from_entity ?? null,
+    to_entity: s.to_entity ?? null,
+  }));
+
+  const { error } = await sb.from("whale_signals_v2").insert(rows);
+  if (error) throw new Error(`insertSignals failed: ${error.message}`);
+
+  return rows.length;
+}
+
+// ─── CORS headers ────────────────────────────────────────────────────────
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
