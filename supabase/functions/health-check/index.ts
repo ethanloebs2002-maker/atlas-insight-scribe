@@ -179,13 +179,13 @@ serve(async (req) => {
   } else {
     const tradeIds = trades.map((t: any) => t.id);
 
-    const mcRes = await sb.from("market_context_snapshots").select("trade_id", { count: "exact" }).in("trade_id", tradeIds);
-    const dcRes = await sb.from("derivatives_context_snapshots").select("trade_id", { count: "exact" }).in("trade_id", tradeIds);
-    const ecRes = await sb.from("execution_cost_snapshots").select("trade_id", { count: "exact" }).in("trade_id", tradeIds);
+    const mcRes = await sb.from("market_context_snapshots").select("position_id", { count: "exact" }).in("position_id", tradeIds);
+    const dcRes = await sb.from("derivatives_context_snapshots").select("position_id", { count: "exact" }).in("position_id", tradeIds);
+    const ecRes = await sb.from("execution_cost_snapshots").select("position_id", { count: "exact" }).in("position_id", tradeIds);
 
-    const mcSet = new Set((mcRes.data ?? []).map((r: any) => r.trade_id).filter(Boolean));
-    const dcSet = new Set((dcRes.data ?? []).map((r: any) => r.trade_id).filter(Boolean));
-    const ecSet = new Set((ecRes.data ?? []).map((r: any) => r.trade_id).filter(Boolean));
+    const mcSet = new Set((mcRes.data ?? []).map((r: any) => r.position_id).filter(Boolean));
+    const dcSet = new Set((dcRes.data ?? []).map((r: any) => r.position_id).filter(Boolean));
+    const ecSet = new Set((ecRes.data ?? []).map((r: any) => r.position_id).filter(Boolean));
 
     const missingArtifacts: any = {
       market_context_missing: [] as string[],

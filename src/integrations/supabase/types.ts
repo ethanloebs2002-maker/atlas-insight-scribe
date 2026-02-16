@@ -526,6 +526,7 @@ export type Database = {
           open_interest_change_1h: number | null
           open_interest_change_24h: number | null
           open_interest_usd: number | null
+          position_id: string | null
           provider: string
           snapshot_time: string
           symbol: string
@@ -542,6 +543,7 @@ export type Database = {
           open_interest_change_1h?: number | null
           open_interest_change_24h?: number | null
           open_interest_usd?: number | null
+          position_id?: string | null
           provider?: string
           snapshot_time: string
           symbol: string
@@ -558,12 +560,41 @@ export type Database = {
           open_interest_change_1h?: number | null
           open_interest_change_24h?: number | null
           open_interest_usd?: number | null
+          position_id?: string | null
           provider?: string
           snapshot_time?: string
           symbol?: string
           trade_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "derivatives_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "paper_positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "derivatives_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_atlas_v3_trade_entry_context"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "derivatives_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_market_context_trade_outcome"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "derivatives_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_whale_trade_outcome_analysis"
+            referencedColumns: ["trade_id"]
+          },
           {
             foreignKeyName: "derivatives_context_snapshots_symbol_fkey"
             columns: ["symbol"]
@@ -674,6 +705,7 @@ export type Database = {
           liquidity_thin: boolean
           metadata: Json
           notional_usd: number
+          position_id: string | null
           snapshot_time: string
           symbol: string
           trade_id: string | null
@@ -688,6 +720,7 @@ export type Database = {
           liquidity_thin?: boolean
           metadata?: Json
           notional_usd: number
+          position_id?: string | null
           snapshot_time: string
           symbol: string
           trade_id?: string | null
@@ -702,11 +735,40 @@ export type Database = {
           liquidity_thin?: boolean
           metadata?: Json
           notional_usd?: number
+          position_id?: string | null
           snapshot_time?: string
           symbol?: string
           trade_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "execution_cost_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "paper_positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "execution_cost_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_atlas_v3_trade_entry_context"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "execution_cost_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_market_context_trade_outcome"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "execution_cost_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_whale_trade_outcome_analysis"
+            referencedColumns: ["trade_id"]
+          },
           {
             foreignKeyName: "execution_cost_snapshots_symbol_fkey"
             columns: ["symbol"]
@@ -1208,6 +1270,7 @@ export type Database = {
           metadata: Json
           mid_price: number | null
           ob_imbalance: number | null
+          position_id: string | null
           rv_1h: number | null
           rv_24h: number | null
           rv_4h: number | null
@@ -1237,6 +1300,7 @@ export type Database = {
           metadata?: Json
           mid_price?: number | null
           ob_imbalance?: number | null
+          position_id?: string | null
           rv_1h?: number | null
           rv_24h?: number | null
           rv_4h?: number | null
@@ -1266,6 +1330,7 @@ export type Database = {
           metadata?: Json
           mid_price?: number | null
           ob_imbalance?: number | null
+          position_id?: string | null
           rv_1h?: number | null
           rv_24h?: number | null
           rv_4h?: number | null
@@ -1280,6 +1345,34 @@ export type Database = {
           vol_regime?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "market_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "paper_positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_atlas_v3_trade_entry_context"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "market_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_market_context_trade_outcome"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "market_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_whale_trade_outcome_analysis"
+            referencedColumns: ["trade_id"]
+          },
           {
             foreignKeyName: "market_context_snapshots_symbol_fkey"
             columns: ["symbol"]
