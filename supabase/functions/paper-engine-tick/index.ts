@@ -451,14 +451,39 @@ class PaperEngineCore {
     if (!pos) return;
 
     const isFirst = pos.status === "PENDING_ENTRY";
+
+    // ── Risk Lab: attach entry market features at fill time ──
+    const entryUpdate: Record<string, unknown> = {
+      status: "OPEN",
+      entry_price: avgPrice,
+      qty,
+      filled_at: isFirst ? this.candle.ts : pos.filled_at,
+    };
+
+    if (isFirst && !pos.entry_mid_price) {
+      try {
+        const { data: ob } = await this.sb.from("latest_orderbook")
+          .select("bid_price, ask_price, spread_bps, imbalance")
+          .eq("symbol", this.symbol).maybeSingle();
+        if (ob) {
+          entryUpdate.entry_mid_price = (ob.bid_price + ob.ask_price) / 2;
+          entryUpdate.entry_bid = ob.bid_price;
+          entryUpdate.entry_ask = ob.ask_price;
+          entryUpdate.spread_bps_at_entry = ob.spread_bps;
+          entryUpdate.imbalance_at_entry = ob.imbalance;
+        }
+        if (!pos.vol_regime_at_entry) {
+          const { data: mctx } = await this.sb.from("market_context_snapshots")
+            .select("vol_regime").eq("symbol", this.symbol)
+            .order("snapshot_time", { ascending: false }).limit(1).maybeSingle();
+          entryUpdate.vol_regime_at_entry = mctx?.vol_regime ?? "unknown";
+        }
+      } catch (e) { console.warn("[risk-lab-tick] entry features failed:", (e as any).message); }
+    }
+
     await this.sb
       .from("paper_positions")
-      .update({
-        status: "OPEN",
-        entry_price: avgPrice,
-        qty,
-        filled_at: isFirst ? this.candle.ts : pos.filled_at,
-      })
+      .update(entryUpdate)
       .eq("id", posId);
 
     await this.emit("POSITION", posId, isFirst ? "POSITION_OPENED" : "POSITION_UPDATED", {
@@ -742,6 +767,55 @@ class PaperEngineCore {
         ? new Date(this.candle.ts).getTime() - new Date(pos.filled_at).getTime()
         : null,
     });
+
+    // ── Risk Lab: update performance on close ──
+    if (pos.risk_profile_key) {
+      try {
+        const regime = pos.vol_regime_at_entry || "unknown";
+        const sBps = pos.spread_bps_at_entry != null ? Number(pos.spread_bps_at_entry) : null;
+        const sBucket = sBps == null ? "normal" : sBps <= 2 ? "tight" : sBps <= 15 ? "normal" : "wide";
+
+        const { data: existing } = await this.sb.from("risk_profile_performance")
+          .select("*")
+          .eq("symbol", pos.symbol).eq("timeframe", pos.timeframe)
+          .eq("regime", regime).eq("spread_bucket", sBucket)
+          .eq("risk_profile_key", pos.risk_profile_key)
+          .maybeSingle();
+
+        const decay = 0.97;
+        const win = pnl > 0 ? 1 : 0;
+        const loss = pnl <= 0 ? 1 : 0;
+
+        if (existing) {
+          const newTrades = Math.round(existing.trades * decay) + 1;
+          const newWins = Math.round(existing.wins * decay) + win;
+          const newLosses = Math.round(existing.losses * decay) + loss;
+          const newSumR = existing.sum_r * decay + realizedR;
+          const newSumPnl = existing.sum_pnl * decay + pnl;
+          await this.sb.from("risk_profile_performance").update({
+            trades: newTrades, wins: newWins, losses: newLosses,
+            sum_r: newSumR, sum_pnl: newSumPnl,
+            avg_r: newTrades > 0 ? newSumR / newTrades : 0,
+            win_rate: newTrades > 0 ? newWins / newTrades : 0,
+            last_updated: new Date().toISOString(),
+          }).eq("id", existing.id);
+        } else {
+          await this.sb.from("risk_profile_performance").insert({
+            symbol: pos.symbol, timeframe: pos.timeframe,
+            regime, spread_bucket: sBucket,
+            risk_profile_key: pos.risk_profile_key,
+            trades: 1, wins: win, losses: loss,
+            sum_r: realizedR, sum_pnl: pnl,
+            avg_r: realizedR, win_rate: win,
+          });
+        }
+
+        await this.emit("ENGINE", posId, "RISK_LAB_UPDATE", {
+          risk_profile_key: pos.risk_profile_key, regime, spread_bucket: sBucket,
+          realized_pnl: pnl, realized_r: realizedR, outcome: outcomeLabel,
+        });
+      } catch (e) { console.warn("[risk-lab-tick] update failed:", (e as any).message); }
+    }
   }
 
   // ─── Stage 7: Expiry handling ────────────────────────────────────────

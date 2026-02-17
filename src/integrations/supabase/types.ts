@@ -2601,6 +2601,14 @@ export type Database = {
           min_rr: number
           notes: string | null
           require_ev_positive: boolean
+          risk_lab_atr_mults: number[]
+          risk_lab_champion_bias: number
+          risk_lab_decay: number
+          risk_lab_enabled: boolean
+          risk_lab_explore_bias: number
+          risk_lab_min_trades: number
+          risk_lab_mode: string
+          risk_lab_variants: number
           slippage_bps: number
           strategy_live_fraction: number | null
           strategy_shadow_only: boolean | null
@@ -2626,6 +2634,14 @@ export type Database = {
           min_rr?: number
           notes?: string | null
           require_ev_positive?: boolean
+          risk_lab_atr_mults?: number[]
+          risk_lab_champion_bias?: number
+          risk_lab_decay?: number
+          risk_lab_enabled?: boolean
+          risk_lab_explore_bias?: number
+          risk_lab_min_trades?: number
+          risk_lab_mode?: string
+          risk_lab_variants?: number
           slippage_bps?: number
           strategy_live_fraction?: number | null
           strategy_shadow_only?: boolean | null
@@ -2651,6 +2667,14 @@ export type Database = {
           min_rr?: number
           notes?: string | null
           require_ev_positive?: boolean
+          risk_lab_atr_mults?: number[]
+          risk_lab_champion_bias?: number
+          risk_lab_decay?: number
+          risk_lab_enabled?: boolean
+          risk_lab_explore_bias?: number
+          risk_lab_min_trades?: number
+          risk_lab_mode?: string
+          risk_lab_variants?: number
           slippage_bps?: number
           strategy_live_fraction?: number | null
           strategy_shadow_only?: boolean | null
@@ -2670,6 +2694,9 @@ export type Database = {
           decision_id: string | null
           duplicate_key: string | null
           eligible_close_at: string | null
+          entry_ask: number | null
+          entry_bid: number | null
+          entry_mid_price: number | null
           entry_order_id: string | null
           entry_price: number | null
           exit_price: number | null
@@ -2679,6 +2706,7 @@ export type Database = {
           filled_at: string | null
           horizon: string
           id: string
+          imbalance_at_entry: number | null
           initial_probability_pred: number | null
           initial_probability_source: string | null
           meta: Json
@@ -2691,9 +2719,12 @@ export type Database = {
           realized_pnl: number | null
           realized_r: number | null
           regime_label: string | null
+          risk_profile: Json | null
+          risk_profile_key: string | null
           run_id: string | null
           side: string
           sl_order_id: string | null
+          spread_bps_at_entry: number | null
           status: string
           stop_price: number | null
           strategy_blueprint_id: string | null
@@ -2702,6 +2733,7 @@ export type Database = {
           tp_order_id: string | null
           tp_price: number | null
           updated_at: string
+          vol_regime_at_entry: string | null
         }
         Insert: {
           close_reason?: string | null
@@ -2710,6 +2742,9 @@ export type Database = {
           decision_id?: string | null
           duplicate_key?: string | null
           eligible_close_at?: string | null
+          entry_ask?: number | null
+          entry_bid?: number | null
+          entry_mid_price?: number | null
           entry_order_id?: string | null
           entry_price?: number | null
           exit_price?: number | null
@@ -2719,6 +2754,7 @@ export type Database = {
           filled_at?: string | null
           horizon?: string
           id?: string
+          imbalance_at_entry?: number | null
           initial_probability_pred?: number | null
           initial_probability_source?: string | null
           meta?: Json
@@ -2731,9 +2767,12 @@ export type Database = {
           realized_pnl?: number | null
           realized_r?: number | null
           regime_label?: string | null
+          risk_profile?: Json | null
+          risk_profile_key?: string | null
           run_id?: string | null
           side: string
           sl_order_id?: string | null
+          spread_bps_at_entry?: number | null
           status?: string
           stop_price?: number | null
           strategy_blueprint_id?: string | null
@@ -2742,6 +2781,7 @@ export type Database = {
           tp_order_id?: string | null
           tp_price?: number | null
           updated_at?: string
+          vol_regime_at_entry?: string | null
         }
         Update: {
           close_reason?: string | null
@@ -2750,6 +2790,9 @@ export type Database = {
           decision_id?: string | null
           duplicate_key?: string | null
           eligible_close_at?: string | null
+          entry_ask?: number | null
+          entry_bid?: number | null
+          entry_mid_price?: number | null
           entry_order_id?: string | null
           entry_price?: number | null
           exit_price?: number | null
@@ -2759,6 +2802,7 @@ export type Database = {
           filled_at?: string | null
           horizon?: string
           id?: string
+          imbalance_at_entry?: number | null
           initial_probability_pred?: number | null
           initial_probability_source?: string | null
           meta?: Json
@@ -2771,9 +2815,12 @@ export type Database = {
           realized_pnl?: number | null
           realized_r?: number | null
           regime_label?: string | null
+          risk_profile?: Json | null
+          risk_profile_key?: string | null
           run_id?: string | null
           side?: string
           sl_order_id?: string | null
+          spread_bps_at_entry?: number | null
           status?: string
           stop_price?: number | null
           strategy_blueprint_id?: string | null
@@ -2782,6 +2829,7 @@ export type Database = {
           tp_order_id?: string | null
           tp_price?: number | null
           updated_at?: string
+          vol_regime_at_entry?: string | null
         }
         Relationships: [
           {
@@ -3299,6 +3347,57 @@ export type Database = {
           email?: string
           id?: string
           is_active?: boolean
+        }
+        Relationships: []
+      }
+      risk_profile_performance: {
+        Row: {
+          avg_r: number
+          id: string
+          last_updated: string
+          losses: number
+          regime: string
+          risk_profile_key: string
+          spread_bucket: string
+          sum_pnl: number
+          sum_r: number
+          symbol: string
+          timeframe: string
+          trades: number
+          win_rate: number
+          wins: number
+        }
+        Insert: {
+          avg_r?: number
+          id?: string
+          last_updated?: string
+          losses?: number
+          regime: string
+          risk_profile_key: string
+          spread_bucket: string
+          sum_pnl?: number
+          sum_r?: number
+          symbol: string
+          timeframe: string
+          trades?: number
+          win_rate?: number
+          wins?: number
+        }
+        Update: {
+          avg_r?: number
+          id?: string
+          last_updated?: string
+          losses?: number
+          regime?: string
+          risk_profile_key?: string
+          spread_bucket?: string
+          sum_pnl?: number
+          sum_r?: number
+          symbol?: string
+          timeframe?: string
+          trades?: number
+          win_rate?: number
+          wins?: number
         }
         Relationships: []
       }

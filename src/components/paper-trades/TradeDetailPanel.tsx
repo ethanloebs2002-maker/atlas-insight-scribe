@@ -109,6 +109,9 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
         </div>
       )}
 
+      {/* Risk Profile Badge */}
+      <RiskProfileBadge positionId={vm.id} />
+
       {/* Confidence Breakdown */}
       <ConfidenceBreakdown decisionId={vm.decisionId} />
 
@@ -559,5 +562,56 @@ function MctxRow({ label, value, valueColor }: { label: string; value: string; v
       <span className="text-muted-foreground">{label}</span>
       <span className={`font-bold ${valueColor ?? "text-foreground"}`}>{value}</span>
     </div>
+  );
+}
+
+function RiskProfileBadge({ positionId }: { positionId: string }) {
+  const { data: pos } = useQuery({
+    queryKey: ["risk-profile-badge", positionId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("paper_positions")
+        .select("risk_profile_key, risk_profile, vol_regime_at_entry, spread_bps_at_entry")
+        .eq("id", positionId)
+        .maybeSingle();
+      return data;
+    },
+  });
+
+  if (!pos?.risk_profile_key) return null;
+
+  const profile = pos.risk_profile as Record<string, any> | null;
+  const label = profile?.label ?? pos.risk_profile_key;
+  const atrMult = profile?.atr_mult;
+
+  const labelColor =
+    label === "tight" ? "text-bearish border-bearish/30" :
+    label === "loose" ? "text-bullish border-bullish/30" :
+    "text-primary border-primary/30";
+
+  return (
+    <Card>
+      <CardContent className="py-2 px-3">
+        <div className="flex items-center gap-2 text-[10px] font-mono">
+          <Shield className="h-3 w-3 text-muted-foreground" />
+          <span className="text-muted-foreground uppercase tracking-wider font-bold">Risk Profile</span>
+          <Badge variant="outline" className={`text-[9px] font-mono ${labelColor}`}>
+            {label}
+          </Badge>
+          {atrMult && (
+            <span className="text-muted-foreground">ATR × {atrMult}</span>
+          )}
+          <span className="text-muted-foreground ml-auto">{pos.risk_profile_key}</span>
+        </div>
+        {pos.vol_regime_at_entry && (
+          <div className="flex items-center gap-2 mt-1 text-[9px] font-mono text-muted-foreground">
+            <span>Regime: <span className="text-foreground">{pos.vol_regime_at_entry}</span></span>
+            {pos.spread_bps_at_entry != null && (
+              <span>Spread: <span className="text-foreground">{Number(pos.spread_bps_at_entry).toFixed(1)} bps</span></span>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
