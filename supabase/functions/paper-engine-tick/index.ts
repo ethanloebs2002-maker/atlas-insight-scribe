@@ -884,7 +884,70 @@ class PaperEngineCore {
     }
   }
 
-  // ─── Stage 8: Invariant checks ──────────────────────────────────────
+  // ─── Stage 8: Safety-net close via latest_prices ──────────────────────
+  // Catches OPEN positions whose brackets should have triggered but didn't
+  // (e.g., due to candle gaps or missed ticks).
+
+  async checkLatestPriceCloses() {
+    const { data: openPos } = await this.sb
+      .from("paper_positions")
+      .select("id, symbol, side, entry_price, stop_price, tp_price, qty, decision_id, filled_at, created_at, timeframe")
+      .eq("symbol", this.symbol)
+      .eq("status", "OPEN")
+      .limit(500);
+
+    if (!openPos?.length) return;
+
+    for (const pos of openPos) {
+      const { data: lp } = await this.sb
+        .from("latest_prices")
+        .select("price, captured_at")
+        .eq("symbol", pos.symbol)
+        .single();
+
+      if (!lp) continue;
+
+      const price = Number(lp.price);
+      const sl = Number(pos.stop_price);
+      const tp = Number(pos.tp_price);
+      const side = String(pos.side).toUpperCase();
+
+      let closeReason: string | null = null;
+      if (side === "LONG") {
+        if (price <= sl) closeReason = "SL";
+        else if (price >= tp) closeReason = "TP";
+      } else {
+        if (price >= sl) closeReason = "SL";
+        else if (price <= tp) closeReason = "TP";
+      }
+
+      if (!closeReason) continue;
+
+      // Cancel any remaining bracket orders
+      const { data: bracketOrders } = await this.sb
+        .from("paper_orders")
+        .select("id")
+        .eq("position_id", pos.id)
+        .eq("reduce_only", true)
+        .in("status", ["NEW", "PARTIAL"]);
+
+      for (const o of bracketOrders ?? []) {
+        await this.sb.from("paper_orders").update({ status: "CANCELED" }).eq("id", o.id);
+      }
+
+      await this.emit("POSITION", pos.id, "SAFETY_NET_CLOSE", {
+        reason: closeReason,
+        live_price: price,
+        stop_price: sl,
+        tp_price: tp,
+        captured_at: lp.captured_at,
+      });
+
+      await this.closePosition(pos.id, price, closeReason);
+    }
+  }
+
+  // ─── Stage 9: Invariant checks ──────────────────────────────────────
 
   async checkInvariants() {
     const { data: openPos } = await this.sb
@@ -919,6 +982,19 @@ function tfToCC(tf: string): { endpoint: string; aggregate: number } {
     case "4h":  return { endpoint: "histohour", aggregate: 4 };
     case "1d":  return { endpoint: "histoday", aggregate: 1 };
     default:    return { endpoint: "histohour", aggregate: 4 };
+  }
+}
+
+async function upsertLatestPrice(sb: ReturnType<typeof createClient>, symbol: string, price: number, source = "cryptocompare") {
+  try {
+    await sb.from("latest_prices").upsert({
+      symbol,
+      price,
+      source,
+      captured_at: new Date().toISOString(),
+    }, { onConflict: "symbol" });
+  } catch (e) {
+    console.warn(`[upsertLatestPrice] ${symbol}:`, e);
   }
 }
 
@@ -962,6 +1038,7 @@ async function runSingleTick(
   await engine.createEntryOrders(approved);
   await engine.matchFills();
   await engine.evalBrackets();
+  await engine.checkLatestPriceCloses();
   await engine.handleExpiries();
   await engine.handleTimeStops();
   await engine.checkInvariants();
@@ -1029,6 +1106,8 @@ serve(async (req) => {
           results.push({ asset: asset.asset_id, error: "candle_fetch_failed" });
           continue;
         }
+        // Persist latest price from candle close
+        await upsertLatestPrice(sb, asset.asset_id, candle.close, "cryptocompare");
         try {
           const r = await runSingleTick(sb, asset.asset_id, asset.default_timeframe, candle, policy);
           results.push({ asset: asset.asset_id, timeframe: asset.default_timeframe, ...r });
@@ -1057,6 +1136,9 @@ serve(async (req) => {
         { status: 502, headers },
       );
     }
+
+    // Persist latest price from candle close
+    await upsertLatestPrice(sb, symbol, resolvedCandle.close, "cryptocompare");
 
     const result = await runSingleTick(sb, symbol, timeframe, resolvedCandle, policy);
     return new Response(JSON.stringify({ ok: true, ...result }), { status: 200, headers });
