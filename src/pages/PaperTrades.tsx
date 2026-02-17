@@ -60,7 +60,7 @@ export default function PaperTrades() {
 
   const stats = statsRes?.data;
   const decisions = stats?.decisions || [];
-  const trades = stats?.trades || [];
+  const trades = stats?.positions || stats?.trades || [];
   const graduation = stats?.graduation || [];
   const confusionMatrix = stats?.confusionMatrix || { UP: { UP: 0, DOWN: 0, NEUTRAL: 0 }, DOWN: { UP: 0, DOWN: 0, NEUTRAL: 0 }, NEUTRAL: { UP: 0, DOWN: 0, NEUTRAL: 0 } };
   const bhHorizonStats = stats?.bhHorizonStats || {};
