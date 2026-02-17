@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { Activity, Search, BarChart3, Anchor, FlaskConical, Newspaper, Brain, Globe, LogOut } from 'lucide-react';
+import { Activity, Search, BarChart3, Anchor, FlaskConical, Newspaper, Brain, Globe, Dna, LogOut } from 'lucide-react';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
 import PortfolioBar from '@/components/PortfolioBar';
 import HelpTooltip from '@/components/HelpTooltip';
@@ -15,6 +15,7 @@ const navItems = [
   { to: '/news', label: 'News Intel', icon: Newspaper, tooltipId: 'nav-news-intel' },
   { to: '/meta', label: 'Meta', icon: Brain, tooltipId: 'nav-meta' },
   { to: '/gpr', label: 'GPR', icon: Globe, tooltipId: 'nav-gpr' },
+  { to: '/strategy-lab', label: 'Strategy', icon: Dna, tooltipId: 'nav-strategy-lab' },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
