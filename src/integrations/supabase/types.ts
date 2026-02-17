@@ -627,6 +627,20 @@ export type Database = {
             foreignKeyName: "derivatives_context_snapshots_position_id_fkey"
             columns: ["position_id"]
             isOneToOne: false
+            referencedRelation: "v_positions_closed"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "derivatives_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_open"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "derivatives_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
             referencedRelation: "v_whale_trade_outcome_analysis"
             referencedColumns: ["trade_id"]
           },
@@ -796,6 +810,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_market_context_trade_outcome"
             referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "execution_cost_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_closed"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "execution_cost_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_open"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "execution_cost_snapshots_position_id_fkey"
@@ -1412,6 +1440,20 @@ export type Database = {
             foreignKeyName: "learning_ledger_position_id_fkey"
             columns: ["position_id"]
             isOneToOne: false
+            referencedRelation: "v_positions_closed"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "learning_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_open"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "learning_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
             referencedRelation: "v_whale_trade_outcome_analysis"
             referencedColumns: ["trade_id"]
           },
@@ -1529,6 +1571,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_market_context_trade_outcome"
             referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "market_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_closed"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_context_snapshots_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_open"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "market_context_snapshots_position_id_fkey"
@@ -2910,6 +2966,20 @@ export type Database = {
             foreignKeyName: "paper_wallet_ledger_position_id_fkey"
             columns: ["position_id"]
             isOneToOne: false
+            referencedRelation: "v_positions_closed"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_wallet_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_open"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_wallet_ledger_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
             referencedRelation: "v_whale_trade_outcome_analysis"
             referencedColumns: ["trade_id"]
           },
@@ -3414,6 +3484,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_market_context_trade_outcome"
             referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "trade_scenario_attribution_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_closed"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_scenario_attribution_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_open"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "trade_scenario_attribution_position_id_fkey"
@@ -4147,6 +4231,246 @@ export type Database = {
           pending_positions: number | null
         }
         Relationships: []
+      }
+      v_positions_closed: {
+        Row: {
+          close_reason: string | null
+          closed_at: string | null
+          decision_id: string | null
+          entry_price: number | null
+          exit_price: number | null
+          filled_at: string | null
+          horizon: string | null
+          id: string | null
+          is_win: boolean | null
+          outcome: string | null
+          outcome_label: string | null
+          realized_pct: number | null
+          realized_pnl: number | null
+          realized_r: number | null
+          side: string | null
+          status: string | null
+          stop_price: number | null
+          symbol: string | null
+          timeframe: string | null
+          tp_price: number | null
+        }
+        Insert: {
+          close_reason?: string | null
+          closed_at?: string | null
+          decision_id?: string | null
+          entry_price?: number | null
+          exit_price?: number | null
+          filled_at?: string | null
+          horizon?: string | null
+          id?: string | null
+          is_win?: never
+          outcome?: string | null
+          outcome_label?: string | null
+          realized_pct?: number | null
+          realized_pnl?: number | null
+          realized_r?: number | null
+          side?: never
+          status?: string | null
+          stop_price?: number | null
+          symbol?: string | null
+          timeframe?: string | null
+          tp_price?: number | null
+        }
+        Update: {
+          close_reason?: string | null
+          closed_at?: string | null
+          decision_id?: string | null
+          entry_price?: number | null
+          exit_price?: number | null
+          filled_at?: string | null
+          horizon?: string | null
+          id?: string | null
+          is_win?: never
+          outcome?: string | null
+          outcome_label?: string | null
+          realized_pct?: number | null
+          realized_pnl?: number | null
+          realized_r?: number | null
+          side?: never
+          status?: string | null
+          stop_price?: number | null
+          symbol?: string | null
+          timeframe?: string | null
+          tp_price?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_positions_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_positions_open: {
+        Row: {
+          close_reason: string | null
+          closed_at: string | null
+          created_at: string | null
+          decision_id: string | null
+          duplicate_key: string | null
+          eligible_close_at: string | null
+          entry_order_id: string | null
+          entry_price: number | null
+          exit_price: number | null
+          expired_at: string | null
+          expires_at: string | null
+          expiry_reason: string | null
+          filled_at: string | null
+          horizon: string | null
+          id: string | null
+          initial_probability_pred: number | null
+          initial_probability_source: string | null
+          meta: Json | null
+          outcome: string | null
+          outcome_label: string | null
+          outcome_reason: string | null
+          policy_id: string | null
+          qty: number | null
+          realized_pct: number | null
+          realized_pnl: number | null
+          realized_r: number | null
+          regime_label: string | null
+          run_id: string | null
+          side: string | null
+          sl_order_id: string | null
+          status: string | null
+          stop_price: number | null
+          symbol: string | null
+          timeframe: string | null
+          tp_order_id: string | null
+          tp_price: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          close_reason?: string | null
+          closed_at?: string | null
+          created_at?: string | null
+          decision_id?: string | null
+          duplicate_key?: string | null
+          eligible_close_at?: string | null
+          entry_order_id?: string | null
+          entry_price?: number | null
+          exit_price?: number | null
+          expired_at?: string | null
+          expires_at?: string | null
+          expiry_reason?: string | null
+          filled_at?: string | null
+          horizon?: string | null
+          id?: string | null
+          initial_probability_pred?: number | null
+          initial_probability_source?: string | null
+          meta?: Json | null
+          outcome?: string | null
+          outcome_label?: string | null
+          outcome_reason?: string | null
+          policy_id?: string | null
+          qty?: number | null
+          realized_pct?: number | null
+          realized_pnl?: number | null
+          realized_r?: number | null
+          regime_label?: string | null
+          run_id?: string | null
+          side?: string | null
+          sl_order_id?: string | null
+          status?: string | null
+          stop_price?: number | null
+          symbol?: string | null
+          timeframe?: string | null
+          tp_order_id?: string | null
+          tp_price?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          close_reason?: string | null
+          closed_at?: string | null
+          created_at?: string | null
+          decision_id?: string | null
+          duplicate_key?: string | null
+          eligible_close_at?: string | null
+          entry_order_id?: string | null
+          entry_price?: number | null
+          exit_price?: number | null
+          expired_at?: string | null
+          expires_at?: string | null
+          expiry_reason?: string | null
+          filled_at?: string | null
+          horizon?: string | null
+          id?: string | null
+          initial_probability_pred?: number | null
+          initial_probability_source?: string | null
+          meta?: Json | null
+          outcome?: string | null
+          outcome_label?: string | null
+          outcome_reason?: string | null
+          policy_id?: string | null
+          qty?: number | null
+          realized_pct?: number | null
+          realized_pnl?: number | null
+          realized_r?: number | null
+          regime_label?: string | null
+          run_id?: string | null
+          side?: string | null
+          sl_order_id?: string | null
+          status?: string | null
+          stop_price?: number | null
+          symbol?: string | null
+          timeframe?: string | null
+          tp_order_id?: string | null
+          tp_price?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_positions_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_entry_order_id_fkey"
+            columns: ["entry_order_id"]
+            isOneToOne: false
+            referencedRelation: "paper_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_policy_id_fkey"
+            columns: ["policy_id"]
+            isOneToOne: false
+            referencedRelation: "paper_policy"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_policy_id_fkey"
+            columns: ["policy_id"]
+            isOneToOne: false
+            referencedRelation: "v_active_paper_policy"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_sl_order_id_fkey"
+            columns: ["sl_order_id"]
+            isOneToOne: false
+            referencedRelation: "paper_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_tp_order_id_fkey"
+            columns: ["tp_order_id"]
+            isOneToOne: false
+            referencedRelation: "paper_orders"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       v_whale_trade_outcome_analysis: {
         Row: {

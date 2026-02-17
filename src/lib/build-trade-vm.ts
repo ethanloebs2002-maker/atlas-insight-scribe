@@ -152,12 +152,26 @@ export function buildTradeVM(
   };
 
   // --- Performance ---
+  const realizedPnL = position ? num(position.realized_pnl) : null;
+  const realizedR = position ? num(position.realized_r) : null;
+  const closeOutcome = outcomeFromReason(position?.close_reason);
+
+  // Determine win/loss from realized PnL (canonical), fallback to price comparison
+  let isWin: boolean | null = null;
+  if (realizedPnL != null) {
+    isWin = realizedPnL > 0;
+  } else if (exitPrice != null && (filledEntry ?? decisionEntry) != null) {
+    const entry = filledEntry ?? decisionEntry!;
+    isWin = side === "LONG" ? exitPrice > entry : exitPrice < entry;
+  }
+
   const performance: TradeVM["performance"] =
     status === "CLOSED" && position
       ? {
-          realizedPnL: num(position.realized_pnl),
-          realizedR: num(position.realized_r),
-          outcome: outcomeFromReason(position.close_reason),
+          realizedPnL,
+          realizedR,
+          outcome: closeOutcome,
+          isWin,
         }
       : undefined;
 

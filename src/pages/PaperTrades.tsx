@@ -103,8 +103,8 @@ export default function PaperTrades() {
   const avgR = closedReturns.length > 0 ? closedReturns.reduce((a, b) => a + b, 0) / closedReturns.length : 0;
   const sortedR = [...closedReturns].sort((a, b) => a - b);
   const medianR = sortedR.length > 0 ? sortedR[Math.floor(sortedR.length / 2)] : 0;
-  const wins = closedVMs.filter(vm => vm.performance?.outcome === "TP").length;
-  const losses = closedVMs.filter(vm => vm.performance?.outcome === "SL").length;
+  const wins = closedVMs.filter(vm => vm.performance?.isWin === true).length;
+  const losses = closedVMs.filter(vm => vm.performance?.isWin === false).length;
   const visibleHorizons = showLearning ? config.learningHorizons : config.publicHorizons;
 
   // Filter by search

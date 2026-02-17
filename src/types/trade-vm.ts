@@ -60,6 +60,7 @@ export type TradeVM = {
     realizedPnL?: number | null;
     realizedR?: number | null;
     outcome?: "TP" | "SL" | "EXPIRY" | "CANCELED" | null;
+    isWin?: boolean | null;
   };
 
   /** Derived scenario resolution window */
