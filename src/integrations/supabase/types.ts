@@ -2330,6 +2330,7 @@ export type Database = {
           realized_move_pct: number | null
           ref_price: number
           stop_loss: number | null
+          strategy_blueprint_id: string | null
           take_profit: number | null
           timeframe: string
           ts: string
@@ -2366,6 +2367,7 @@ export type Database = {
           realized_move_pct?: number | null
           ref_price: number
           stop_loss?: number | null
+          strategy_blueprint_id?: string | null
           take_profit?: number | null
           timeframe?: string
           ts?: string
@@ -2402,12 +2404,21 @@ export type Database = {
           realized_move_pct?: number | null
           ref_price?: number
           stop_loss?: number | null
+          strategy_blueprint_id?: string | null
           take_profit?: number | null
           timeframe?: string
           ts?: string
           version_tag?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "paper_decisions_strategy_blueprint_id_fkey"
+            columns: ["strategy_blueprint_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_blueprints"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       paper_engine_events: {
         Row: {
@@ -2591,6 +2602,10 @@ export type Database = {
           notes: string | null
           require_ev_positive: boolean
           slippage_bps: number
+          strategy_live_fraction: number | null
+          strategy_shadow_only: boolean | null
+          tournament_explore_k: number | null
+          tournament_top_k: number | null
           updated_at: string
           version_tag: string
           worst_case_same_candle: boolean
@@ -2612,6 +2627,10 @@ export type Database = {
           notes?: string | null
           require_ev_positive?: boolean
           slippage_bps?: number
+          strategy_live_fraction?: number | null
+          strategy_shadow_only?: boolean | null
+          tournament_explore_k?: number | null
+          tournament_top_k?: number | null
           updated_at?: string
           version_tag?: string
           worst_case_same_candle?: boolean
@@ -2633,6 +2652,10 @@ export type Database = {
           notes?: string | null
           require_ev_positive?: boolean
           slippage_bps?: number
+          strategy_live_fraction?: number | null
+          strategy_shadow_only?: boolean | null
+          tournament_explore_k?: number | null
+          tournament_top_k?: number | null
           updated_at?: string
           version_tag?: string
           worst_case_same_candle?: boolean
@@ -2673,6 +2696,7 @@ export type Database = {
           sl_order_id: string | null
           status: string
           stop_price: number | null
+          strategy_blueprint_id: string | null
           symbol: string
           timeframe: string
           tp_order_id: string | null
@@ -2712,6 +2736,7 @@ export type Database = {
           sl_order_id?: string | null
           status?: string
           stop_price?: number | null
+          strategy_blueprint_id?: string | null
           symbol: string
           timeframe?: string
           tp_order_id?: string | null
@@ -2751,6 +2776,7 @@ export type Database = {
           sl_order_id?: string | null
           status?: string
           stop_price?: number | null
+          strategy_blueprint_id?: string | null
           symbol?: string
           timeframe?: string
           tp_order_id?: string | null
@@ -2791,6 +2817,13 @@ export type Database = {
             columns: ["sl_order_id"]
             isOneToOne: false
             referencedRelation: "paper_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paper_positions_strategy_blueprint_id_fkey"
+            columns: ["strategy_blueprint_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_blueprints"
             referencedColumns: ["id"]
           },
           {
@@ -3328,6 +3361,273 @@ export type Database = {
           wins?: number | null
         }
         Relationships: []
+      }
+      strategy_blueprints: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          genome: Json
+          id: string
+          is_active: boolean | null
+          name: string
+          tags: string[] | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          genome?: Json
+          id?: string
+          is_active?: boolean | null
+          name: string
+          tags?: string[] | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          genome?: Json
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          tags?: string[] | null
+        }
+        Relationships: []
+      }
+      strategy_primitives: {
+        Row: {
+          category: string
+          created_at: string
+          default_params: Json
+          description: string
+          id: string
+          key: string
+          param_schema: Json
+          requires_features: string[]
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          default_params?: Json
+          description: string
+          id?: string
+          key: string
+          param_schema?: Json
+          requires_features?: string[]
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          default_params?: Json
+          description?: string
+          id?: string
+          key?: string
+          param_schema?: Json
+          requires_features?: string[]
+        }
+        Relationships: []
+      }
+      strategy_reputation: {
+        Row: {
+          blueprint_id: string
+          confidence: number
+          last_updated: string | null
+          notes: string | null
+          reputation: number
+        }
+        Insert: {
+          blueprint_id: string
+          confidence?: number
+          last_updated?: string | null
+          notes?: string | null
+          reputation?: number
+        }
+        Update: {
+          blueprint_id?: string
+          confidence?: number
+          last_updated?: string | null
+          notes?: string | null
+          reputation?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "strategy_reputation_blueprint_id_fkey"
+            columns: ["blueprint_id"]
+            isOneToOne: true
+            referencedRelation: "strategy_blueprints"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      strategy_runs: {
+        Row: {
+          blueprint_id: string
+          created_at: string
+          end_ts: string
+          id: string
+          mode: string
+          start_ts: string
+          status: string
+          summary: Json | null
+          symbols: string[]
+          timeframe: string
+        }
+        Insert: {
+          blueprint_id: string
+          created_at?: string
+          end_ts: string
+          id?: string
+          mode?: string
+          start_ts: string
+          status?: string
+          summary?: Json | null
+          symbols: string[]
+          timeframe: string
+        }
+        Update: {
+          blueprint_id?: string
+          created_at?: string
+          end_ts?: string
+          id?: string
+          mode?: string
+          start_ts?: string
+          status?: string
+          summary?: Json | null
+          symbols?: string[]
+          timeframe?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "strategy_runs_blueprint_id_fkey"
+            columns: ["blueprint_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_blueprints"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      strategy_scores: {
+        Row: {
+          blueprint_id: string
+          computed_at: string | null
+          expectancy_r: number
+          id: string
+          max_drawdown_r: number
+          profit_factor: number
+          regime_breakdown: Json
+          run_id: string
+          sample_trades: number
+          sharpe_proxy: number
+          stability: number
+          symbol: string
+          timeframe: string
+          win_rate: number
+        }
+        Insert: {
+          blueprint_id: string
+          computed_at?: string | null
+          expectancy_r?: number
+          id?: string
+          max_drawdown_r?: number
+          profit_factor?: number
+          regime_breakdown?: Json
+          run_id: string
+          sample_trades?: number
+          sharpe_proxy?: number
+          stability?: number
+          symbol: string
+          timeframe: string
+          win_rate?: number
+        }
+        Update: {
+          blueprint_id?: string
+          computed_at?: string | null
+          expectancy_r?: number
+          id?: string
+          max_drawdown_r?: number
+          profit_factor?: number
+          regime_breakdown?: Json
+          run_id?: string
+          sample_trades?: number
+          sharpe_proxy?: number
+          stability?: number
+          symbol?: string
+          timeframe?: string
+          win_rate?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "strategy_scores_blueprint_id_fkey"
+            columns: ["blueprint_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_blueprints"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "strategy_scores_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      strategy_shadow_signals: {
+        Row: {
+          blueprint_id: string
+          created_at: string
+          direction: string
+          entry_price: number | null
+          feature_snapshot: Json | null
+          gate_results: Json | null
+          id: string
+          risk_pct: number | null
+          stop_price: number | null
+          symbol: string
+          timeframe: string
+          tp_price: number | null
+          veto_reason: string | null
+          vetoed: boolean | null
+        }
+        Insert: {
+          blueprint_id: string
+          created_at?: string
+          direction: string
+          entry_price?: number | null
+          feature_snapshot?: Json | null
+          gate_results?: Json | null
+          id?: string
+          risk_pct?: number | null
+          stop_price?: number | null
+          symbol: string
+          timeframe: string
+          tp_price?: number | null
+          veto_reason?: string | null
+          vetoed?: boolean | null
+        }
+        Update: {
+          blueprint_id?: string
+          created_at?: string
+          direction?: string
+          entry_price?: number | null
+          feature_snapshot?: Json | null
+          gate_results?: Json | null
+          id?: string
+          risk_pct?: number | null
+          stop_price?: number | null
+          symbol?: string
+          timeframe?: string
+          tp_price?: number | null
+          veto_reason?: string | null
+          vetoed?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "strategy_shadow_signals_blueprint_id_fkey"
+            columns: ["blueprint_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_blueprints"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       system_status: {
         Row: {

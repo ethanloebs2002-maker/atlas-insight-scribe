@@ -59,3 +59,12 @@ verify_jwt = false
 
 [functions.confidence-recalc]
 verify_jwt = false
+
+[functions.strategy-tournament-tick]
+verify_jwt = false
+
+[functions.strategy-reputation-update]
+verify_jwt = false
+
+[functions.strategy-evolve]
+verify_jwt = false
