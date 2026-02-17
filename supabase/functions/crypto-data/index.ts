@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -315,6 +316,30 @@ serve(async (req) => {
 
     if (action === "market") {
       const markets = await fetchCryptoCompareMarket(symbols);
+
+      // Persist latest prices to DB for execution auditability
+      if (markets.length > 0) {
+        try {
+          const sb = createClient(
+            Deno.env.get("SUPABASE_URL")!,
+            Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+          );
+          const rows = markets
+            .filter(m => m.price > 0)
+            .map(m => ({
+              symbol: m.symbol,
+              price: m.price,
+              source: "cryptocompare",
+              captured_at: new Date().toISOString(),
+            }));
+          if (rows.length) {
+            await sb.from("latest_prices").upsert(rows, { onConflict: "symbol" });
+          }
+        } catch (e) {
+          console.warn("[crypto-data] latest_prices upsert failed:", e);
+        }
+      }
+
       return new Response(JSON.stringify({ data: markets, source: "cryptocompare", timestamp: Date.now() }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

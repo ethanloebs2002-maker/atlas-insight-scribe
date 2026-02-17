@@ -1253,6 +1253,27 @@ export type Database = {
         }
         Relationships: []
       }
+      latest_prices: {
+        Row: {
+          captured_at: string
+          price: number
+          source: string
+          symbol: string
+        }
+        Insert: {
+          captured_at?: string
+          price: number
+          source?: string
+          symbol: string
+        }
+        Update: {
+          captured_at?: string
+          price?: number
+          source?: string
+          symbol?: string
+        }
+        Relationships: []
+      }
       learning_ledger: {
         Row: {
           asset_id: string

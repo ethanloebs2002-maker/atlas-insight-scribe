@@ -43,6 +43,7 @@ serve(async (req) => {
     "trade_scenario_attribution",
     "paper_wallets",
     "paper_wallet_ledger",
+    "latest_prices",
   ];
 
   const tablePresence: Record<string, boolean> = {};
@@ -71,7 +72,7 @@ serve(async (req) => {
   // ---------- C) Fill proof
   const recentFills = await sb
     .from("paper_positions")
-    .select("id, asset_id, side, created_at, filled_at, entry_price, stop_loss, take_profit")
+    .select("id, symbol, side, created_at, filled_at, entry_price, stop_price, tp_price")
     .gte("filled_at", since)
     .order("filled_at", { ascending: false })
     .limit(50);
@@ -91,7 +92,7 @@ serve(async (req) => {
   // ---------- D) Close proof
   const recentCloses = await sb
     .from("paper_positions")
-    .select("id, asset_id, side, filled_at, closed_at, realized_pnl, close_reason, stop_loss, take_profit, entry_price")
+    .select("id, symbol, side, filled_at, closed_at, realized_pnl, close_reason, stop_price, tp_price, entry_price")
     .gte("closed_at", since)
     .order("closed_at", { ascending: false })
     .limit(50);
@@ -103,7 +104,7 @@ serve(async (req) => {
   // ---------- E) Bracket sanity (OPEN positions)
   const openSample = await sb
     .from("paper_positions")
-    .select("id, asset_id, side, entry_price, stop_loss, take_profit, filled_at, created_at")
+    .select("id, symbol, side, entry_price, stop_price, tp_price, filled_at, created_at")
     .eq("status", "OPEN")
     .order("filled_at", { ascending: false })
     .limit(50);
@@ -111,8 +112,8 @@ serve(async (req) => {
   const openRows = openSample.data ?? [];
   const invalid = openRows.filter(p => {
     const entry = Number(p.entry_price);
-    const sl = Number(p.stop_loss);
-    const tp = Number(p.take_profit);
+    const sl = Number(p.stop_price);
+    const tp = Number(p.tp_price);
     if (!Number.isFinite(entry) || !Number.isFinite(sl) || !Number.isFinite(tp)) return true;
     if (String(p.side).toUpperCase() === "LONG") return !(sl < entry && entry < tp);
     return !(tp < entry && entry < sl);
@@ -121,6 +122,38 @@ serve(async (req) => {
   if (openRows.length === 0) checks.push(warn("Bracket sanity (OPEN)", { note: "No OPEN positions to validate" }));
   else if (invalid.length) checks.push(fail("Bracket sanity (OPEN)", { invalid: invalid.slice(0, 10), total_invalid: invalid.length, checked: openRows.length }));
   else checks.push(pass("Bracket sanity (OPEN)", { checked: openRows.length }));
+
+  // ---------- E2) Should-close check against latest_prices
+  const { data: latestPrices } = await sb.from("latest_prices").select("symbol, price, captured_at");
+  const priceMap: Record<string, { price: number; captured_at: string }> = {};
+  for (const lp of latestPrices ?? []) {
+    priceMap[lp.symbol] = { price: Number(lp.price), captured_at: lp.captured_at };
+  }
+
+  const shouldCloseItems: any[] = [];
+  for (const p of openRows) {
+    const lp = priceMap[p.symbol];
+    if (!lp) continue;
+    const side = String(p.side).toUpperCase();
+    const sl = Number(p.stop_price);
+    const tp = Number(p.tp_price);
+    let verdict = "OK";
+    if (side === "LONG" && lp.price <= sl) verdict = "SHOULD_STOP";
+    else if (side === "LONG" && lp.price >= tp) verdict = "SHOULD_TP";
+    else if (side === "SHORT" && lp.price >= sl) verdict = "SHOULD_STOP";
+    else if (side === "SHORT" && lp.price <= tp) verdict = "SHOULD_TP";
+    if (verdict !== "OK") {
+      shouldCloseItems.push({ id: p.id, symbol: p.symbol, side, entry_price: p.entry_price, stop_price: sl, tp_price: tp, live_price: lp.price, captured_at: lp.captured_at, verdict });
+    }
+  }
+
+  if (shouldCloseItems.length > 0) {
+    checks.push(fail("Should-close (latest_prices)", { count: shouldCloseItems.length, items: shouldCloseItems.slice(0, 10) }));
+  } else if (Object.keys(priceMap).length === 0) {
+    checks.push(warn("Should-close (latest_prices)", { note: "No latest_prices data yet" }));
+  } else {
+    checks.push(pass("Should-close (latest_prices)", { checked: openRows.length, prices_available: Object.keys(priceMap).length }));
+  }
 
   // ---------- F) Snapshot coverage on recent fills/closes
   const recentPosIds = Array.from(new Set([
@@ -183,6 +216,20 @@ serve(async (req) => {
       checks.push(warn("Wallet PnL credit proof", { note: "There are closes but no TRADE_PNL in window", closes: closes.length, pnl_events: 0 }));
     } else {
       checks.push(pass("Wallet PnL credit proof", { pnl_events: pnlEvents.length, sample: pnlEvents.slice(0, 5) }));
+    }
+  }
+
+  // ---------- I) Latest prices freshness
+  const { data: freshness } = await sb.from("latest_prices").select("symbol, price, captured_at").order("captured_at", { ascending: false });
+  if (!freshness?.length) {
+    checks.push(warn("Latest prices freshness", { note: "No rows in latest_prices" }));
+  } else {
+    const staleThreshold = 30 * 60_000; // 30 minutes
+    const stale = freshness.filter(r => (now.getTime() - new Date(r.captured_at).getTime()) > staleThreshold);
+    if (stale.length > 0) {
+      checks.push(warn("Latest prices freshness", { stale_count: stale.length, stale_symbols: stale.map(s => s.symbol), total: freshness.length }));
+    } else {
+      checks.push(pass("Latest prices freshness", { count: freshness.length, newest: freshness[0] }));
     }
   }
 
