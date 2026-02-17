@@ -35,15 +35,10 @@ serve(async (req) => {
 
   // ---------- A) Schema presence
   const requiredTables = [
-    "paper_decisions",
-    "paper_positions",
-    "market_context_snapshots",
-    "derivatives_context_snapshots",
-    "execution_cost_snapshots",
-    "trade_scenario_attribution",
-    "paper_wallets",
-    "paper_wallet_ledger",
-    "latest_prices",
+    "paper_decisions", "paper_positions",
+    "market_context_snapshots", "derivatives_context_snapshots", "execution_cost_snapshots",
+    "trade_scenario_attribution", "paper_wallets", "paper_wallet_ledger",
+    "latest_prices", "latest_orderbook", "market_data_config",
   ];
 
   const tablePresence: Record<string, boolean> = {};
@@ -85,7 +80,6 @@ serve(async (req) => {
       .map(p => (p.filled_at ? (new Date(p.filled_at).getTime() - new Date(p.created_at).getTime()) : null))
       .filter(x => typeof x === "number") as number[];
     const avgSec = latMs.length ? Math.round((latMs.reduce((a, b) => a + b, 0) / latMs.length) / 1000) : null;
-
     checks.push(pass("Fill proof", { fills: fills.length, avg_fill_latency_sec: avgSec, sample: fills.slice(0, 5) }));
   }
 
@@ -123,36 +117,68 @@ serve(async (req) => {
   else if (invalid.length) checks.push(fail("Bracket sanity (OPEN)", { invalid: invalid.slice(0, 10), total_invalid: invalid.length, checked: openRows.length }));
   else checks.push(pass("Bracket sanity (OPEN)", { checked: openRows.length }));
 
-  // ---------- E2) Should-close check against latest_prices
+  // ---------- E2) Should-close check with canonical backbone (orderbook + prices)
   const { data: latestPrices } = await sb.from("latest_prices").select("symbol, price, captured_at");
+  const { data: latestOB } = await sb.from("latest_orderbook").select("symbol, bid_price, ask_price, spread_bps, imbalance, captured_at");
+
   const priceMap: Record<string, { price: number; captured_at: string }> = {};
   for (const lp of latestPrices ?? []) {
     priceMap[lp.symbol] = { price: Number(lp.price), captured_at: lp.captured_at };
   }
 
+  const obMap: Record<string, { bid: number; ask: number; spread_bps: number; imbalance: number | null; captured_at: string }> = {};
+  for (const ob of latestOB ?? []) {
+    obMap[ob.symbol] = {
+      bid: Number(ob.bid_price),
+      ask: Number(ob.ask_price),
+      spread_bps: Number(ob.spread_bps),
+      imbalance: ob.imbalance != null ? Number(ob.imbalance) : null,
+      captured_at: ob.captured_at,
+    };
+  }
+
   const shouldCloseItems: any[] = [];
   for (const p of openRows) {
     const lp = priceMap[p.symbol];
-    if (!lp) continue;
+    const ob = obMap[p.symbol];
+    if (!lp && !ob) continue;
+
     const side = String(p.side).toUpperCase();
     const sl = Number(p.stop_price);
     const tp = Number(p.tp_price);
+
+    // Direction-aware: LONG uses bid, SHORT uses ask
+    const checkPrice = ob
+      ? (side === "LONG" ? ob.bid : ob.ask)
+      : lp!.price;
+
     let verdict = "OK";
-    if (side === "LONG" && lp.price <= sl) verdict = "SHOULD_STOP";
-    else if (side === "LONG" && lp.price >= tp) verdict = "SHOULD_TP";
-    else if (side === "SHORT" && lp.price >= sl) verdict = "SHOULD_STOP";
-    else if (side === "SHORT" && lp.price <= tp) verdict = "SHOULD_TP";
+    if (side === "LONG" && checkPrice <= sl) verdict = "SHOULD_STOP";
+    else if (side === "LONG" && checkPrice >= tp) verdict = "SHOULD_TP";
+    else if (side === "SHORT" && checkPrice >= sl) verdict = "SHOULD_STOP";
+    else if (side === "SHORT" && checkPrice <= tp) verdict = "SHOULD_TP";
+
     if (verdict !== "OK") {
-      shouldCloseItems.push({ id: p.id, symbol: p.symbol, side, entry_price: p.entry_price, stop_price: sl, tp_price: tp, live_price: lp.price, captured_at: lp.captured_at, verdict });
+      shouldCloseItems.push({
+        id: p.id, symbol: p.symbol, side,
+        entry_price: p.entry_price, stop_price: sl, tp_price: tp,
+        check_price: checkPrice,
+        bid: ob?.bid ?? null, ask: ob?.ask ?? null,
+        mid_price: lp?.price ?? null,
+        spread_bps: ob?.spread_bps ?? null,
+        imbalance: ob?.imbalance ?? null,
+        captured_at: ob?.captured_at ?? lp?.captured_at,
+        verdict,
+      });
     }
   }
 
   if (shouldCloseItems.length > 0) {
-    checks.push(fail("Should-close (latest_prices)", { count: shouldCloseItems.length, items: shouldCloseItems.slice(0, 10) }));
-  } else if (Object.keys(priceMap).length === 0) {
-    checks.push(warn("Should-close (latest_prices)", { note: "No latest_prices data yet" }));
+    checks.push(fail("Should-close (backbone)", { count: shouldCloseItems.length, items: shouldCloseItems.slice(0, 10) }));
+  } else if (Object.keys(priceMap).length === 0 && Object.keys(obMap).length === 0) {
+    checks.push(warn("Should-close (backbone)", { note: "No canonical market data yet — run market-data-pump" }));
   } else {
-    checks.push(pass("Should-close (latest_prices)", { checked: openRows.length, prices_available: Object.keys(priceMap).length }));
+    checks.push(pass("Should-close (backbone)", { checked: openRows.length, prices: Object.keys(priceMap).length, orderbooks: Object.keys(obMap).length }));
   }
 
   // ---------- F) Snapshot coverage on recent fills/closes
@@ -190,7 +216,6 @@ serve(async (req) => {
     } else {
       const present = new Set((a.data ?? []).map((x: any) => x.position_id));
       const coverage = present.size / recentPosIds.length;
-
       if (present.size === 0) checks.push(warn("Attribution proof", { coverage, present: present.size, total: recentPosIds.length }));
       else checks.push(pass("Attribution proof", { coverage, present: present.size, total: recentPosIds.length }));
     }
@@ -219,17 +244,37 @@ serve(async (req) => {
     }
   }
 
-  // ---------- I) Latest prices freshness
-  const { data: freshness } = await sb.from("latest_prices").select("symbol, price, captured_at").order("captured_at", { ascending: false });
-  if (!freshness?.length) {
-    checks.push(warn("Latest prices freshness", { note: "No rows in latest_prices" }));
+  // ---------- I) Canonical backbone freshness
+  const { data: freshPrices } = await sb.from("latest_prices").select("symbol, price, captured_at").order("captured_at", { ascending: false });
+  const { data: freshOB } = await sb.from("latest_orderbook").select("symbol, captured_at").order("captured_at", { ascending: false });
+
+  // Read staleness config
+  const { data: cfgRows } = await sb.from("market_data_config").select("stale_ms_exec, stale_ms_ui").limit(1);
+  const cfg = cfgRows?.[0] ?? { stale_ms_exec: 1500, stale_ms_ui: 5000 };
+
+  if (!freshPrices?.length && !freshOB?.length) {
+    checks.push(warn("Backbone freshness", { note: "No rows in latest_prices or latest_orderbook — run market-data-pump" }));
   } else {
-    const staleThreshold = 30 * 60_000; // 30 minutes
-    const stale = freshness.filter(r => (now.getTime() - new Date(r.captured_at).getTime()) > staleThreshold);
-    if (stale.length > 0) {
-      checks.push(warn("Latest prices freshness", { stale_count: stale.length, stale_symbols: stale.map(s => s.symbol), total: freshness.length }));
+    const uiStaleMs = cfg.stale_ms_ui;
+    const execStaleMs = cfg.stale_ms_exec;
+    const stalePrices = (freshPrices ?? []).filter(r => (now.getTime() - new Date(r.captured_at).getTime()) > uiStaleMs);
+    const staleOBs = (freshOB ?? []).filter(r => (now.getTime() - new Date(r.captured_at).getTime()) > uiStaleMs);
+
+    if (stalePrices.length > 0 || staleOBs.length > 0) {
+      checks.push(warn("Backbone freshness", {
+        stale_prices: stalePrices.map(s => s.symbol),
+        stale_orderbooks: staleOBs.map(s => s.symbol),
+        stale_ms_ui: uiStaleMs,
+        stale_ms_exec: execStaleMs,
+      }));
     } else {
-      checks.push(pass("Latest prices freshness", { count: freshness.length, newest: freshness[0] }));
+      checks.push(pass("Backbone freshness", {
+        prices_count: (freshPrices ?? []).length,
+        orderbooks_count: (freshOB ?? []).length,
+        newest_price: freshPrices?.[0],
+        newest_ob: freshOB?.[0],
+        config: cfg,
+      }));
     }
   }
 

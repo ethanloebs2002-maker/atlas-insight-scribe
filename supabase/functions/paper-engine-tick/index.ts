@@ -884,9 +884,10 @@ class PaperEngineCore {
     }
   }
 
-  // ─── Stage 8: Safety-net close via latest_prices ──────────────────────
-  // Catches OPEN positions whose brackets should have triggered but didn't
-  // (e.g., due to candle gaps or missed ticks).
+  // ─── Stage 8: Safety-net close via canonical backbone ──────────────────
+  // Uses latest_orderbook (bid/ask) for direction-aware close checks.
+  // Falls back to latest_prices if orderbook unavailable.
+  // Staleness gating: if data too old, logs STALE_DATA_BLOCK instead.
 
   async checkLatestPriceCloses() {
     const { data: openPos } = await this.sb
@@ -898,27 +899,63 @@ class PaperEngineCore {
 
     if (!openPos?.length) return;
 
+    // Read staleness config
+    const { data: cfgRows } = await this.sb.from("market_data_config").select("stale_ms_exec").limit(1);
+    const staleMs = cfgRows?.[0]?.stale_ms_exec ?? 1500;
+
     for (const pos of openPos) {
+      // Prefer orderbook for direction-aware pricing
+      const { data: ob } = await this.sb
+        .from("latest_orderbook")
+        .select("bid_price, ask_price, captured_at")
+        .eq("symbol", pos.symbol)
+        .single();
+
+      // Fallback to latest_prices
       const { data: lp } = await this.sb
         .from("latest_prices")
         .select("price, captured_at")
         .eq("symbol", pos.symbol)
         .single();
 
-      if (!lp) continue;
+      const capturedAt = ob?.captured_at ?? lp?.captured_at;
+      if (!capturedAt) continue;
 
-      const price = Number(lp.price);
+      // Staleness gate
+      const ageMs = Date.now() - new Date(capturedAt).getTime();
+      if (ageMs > staleMs) {
+        await this.emit("ENGINE", null, "STALE_DATA_BLOCK", {
+          symbol: pos.symbol,
+          position_id: pos.id,
+          age_ms: ageMs,
+          stale_ms_threshold: staleMs,
+        });
+        continue;
+      }
+
+      const side = String(pos.side).toUpperCase();
       const sl = Number(pos.stop_price);
       const tp = Number(pos.tp_price);
-      const side = String(pos.side).toUpperCase();
+
+      // Direction-aware pricing:
+      // LONG exits: use bid (what you'd sell at)
+      // SHORT exits: use ask (what you'd buy at)
+      let exitCheckPrice: number;
+      if (ob) {
+        exitCheckPrice = side === "LONG" ? Number(ob.bid_price) : Number(ob.ask_price);
+      } else if (lp) {
+        exitCheckPrice = Number(lp.price);
+      } else {
+        continue;
+      }
 
       let closeReason: string | null = null;
       if (side === "LONG") {
-        if (price <= sl) closeReason = "SL";
-        else if (price >= tp) closeReason = "TP";
+        if (exitCheckPrice <= sl) closeReason = "SL";
+        else if (exitCheckPrice >= tp) closeReason = "TP";
       } else {
-        if (price >= sl) closeReason = "SL";
-        else if (price <= tp) closeReason = "TP";
+        if (exitCheckPrice >= sl) closeReason = "SL";
+        else if (exitCheckPrice <= tp) closeReason = "TP";
       }
 
       if (!closeReason) continue;
@@ -937,13 +974,17 @@ class PaperEngineCore {
 
       await this.emit("POSITION", pos.id, "SAFETY_NET_CLOSE", {
         reason: closeReason,
-        live_price: price,
+        exit_check_price: exitCheckPrice,
+        bid: ob ? Number(ob.bid_price) : null,
+        ask: ob ? Number(ob.ask_price) : null,
+        mid: lp ? Number(lp.price) : null,
         stop_price: sl,
         tp_price: tp,
-        captured_at: lp.captured_at,
+        captured_at: capturedAt,
+        age_ms: ageMs,
       });
 
-      await this.closePosition(pos.id, price, closeReason);
+      await this.closePosition(pos.id, exitCheckPrice, closeReason);
     }
   }
 
