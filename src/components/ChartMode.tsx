@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  ComposedChart, Line, Bar, XAxis, YAxis, Tooltip as RTooltip,
+  ComposedChart, Line, Bar, Area, XAxis, YAxis, Tooltip as RTooltip,
   ResponsiveContainer, ReferenceLine, ReferenceArea, Customized,
 } from "recharts";
 import { X, ZoomIn, ZoomOut, RotateCcw, Crosshair } from "lucide-react";
@@ -263,37 +263,89 @@ export default function ChartMode({ open, onOpenChange, data, symbol, timeframe,
 
         {/* Chart area */}
         <div className="flex-1 p-2 overflow-hidden">
-          <ResponsiveContainer width="100%" height={chartH}>
-            <ComposedChart data={visible} margin={{ top: 8, right: 8, bottom: 0, left: 4 }}>
-              <XAxis dataKey="time" type="number" domain={["dataMin", "dataMax"]} tickFormatter={formatTime}
-                tick={{ fontSize: 9, fontFamily: "JetBrains Mono", fill: "hsl(215, 12%, 50%)" }}
-                axisLine={{ stroke: "hsl(220, 15%, 18%)" }} tickLine={false} />
-              <YAxis domain={[yMin, yMax]} tickFormatter={formatPrice}
-                tick={{ fontSize: 9, fontFamily: "JetBrains Mono", fill: "hsl(215, 12%, 50%)" }}
-                axisLine={false} tickLine={false} width={65} orientation="right" />
-              <RTooltip content={<ChartTooltipContent />} />
+          {isSimple ? (
+            /* ── Simple: Coinbase-style line chart ── */
+            <>
+              {visible.length > 0 && (() => {
+                const last = visible[visible.length - 1];
+                const first = visible[0];
+                const change = last.close - first.close;
+                const isUp = change >= 0;
+                return (
+                  <div className="px-4 pt-2 pb-1">
+                    <div className="text-3xl font-mono font-bold text-foreground">
+                      ${last.close.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </div>
+                    <div className={`text-sm font-mono ${isUp ? "text-bullish" : "text-bearish"}`}>
+                      {isUp ? "▲" : "▼"} ${Math.abs(change).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      {" "}({((change / (first.close || 1)) * 100).toFixed(2)}%)
+                    </div>
+                  </div>
+                );
+              })()}
+              <ResponsiveContainer width="100%" height={chartH - 60}>
+                <ComposedChart data={visible} margin={{ top: 16, right: 0, bottom: 0, left: 0 }}>
+                  <defs>
+                    <linearGradient id="popoutLineGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={visible.length > 1 && visible[visible.length - 1].close >= visible[0].close ? "hsl(160, 80%, 48%)" : "hsl(0, 72%, 55%)"} stopOpacity={0.25} />
+                      <stop offset="100%" stopColor={visible.length > 1 && visible[visible.length - 1].close >= visible[0].close ? "hsl(160, 80%, 48%)" : "hsl(0, 72%, 55%)"} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="time" type="number" domain={["dataMin", "dataMax"]} tickFormatter={formatTime}
+                    tick={{ fontSize: 9, fontFamily: "JetBrains Mono", fill: "hsl(215, 12%, 40%)" }}
+                    axisLine={false} tickLine={false} tickCount={8} />
+                  <YAxis domain={[yMin, yMax]} hide />
+                  <RTooltip content={({ active, payload }: any) => {
+                    if (!active || !payload?.[0]) return null;
+                    const d = payload[0].payload;
+                    return (
+                      <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-mono shadow-xl">
+                        <div className="text-foreground font-bold">${Number(d.close).toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                        <div className="text-muted-foreground text-[10px]">{new Date(d.time).toLocaleString()}</div>
+                      </div>
+                    );
+                  }} cursor={{ stroke: "hsl(215, 12%, 30%)", strokeDasharray: "4 2" }} />
+                  <Area type="monotone" dataKey="close" stroke="none" fill="url(#popoutLineGradient)" isAnimationActive={false} />
+                  <Line type="monotone" dataKey="close"
+                    stroke={visible.length > 1 && visible[visible.length - 1].close >= visible[0].close ? "hsl(160, 80%, 48%)" : "hsl(0, 72%, 55%)"}
+                    strokeWidth={2} dot={false} isAnimationActive={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </>
+          ) : (
+            /* ── Advanced: Candlestick chart ── */
+            <ResponsiveContainer width="100%" height={chartH}>
+              <ComposedChart data={visible} margin={{ top: 8, right: 8, bottom: 0, left: 4 }}>
+                <XAxis dataKey="time" type="number" domain={["dataMin", "dataMax"]} tickFormatter={formatTime}
+                  tick={{ fontSize: 9, fontFamily: "JetBrains Mono", fill: "hsl(215, 12%, 50%)" }}
+                  axisLine={{ stroke: "hsl(220, 15%, 18%)" }} tickLine={false} />
+                <YAxis domain={[yMin, yMax]} tickFormatter={formatPrice}
+                  tick={{ fontSize: 9, fontFamily: "JetBrains Mono", fill: "hsl(215, 12%, 50%)" }}
+                  axisLine={false} tickLine={false} width={65} orientation="right" />
+                <RTooltip content={<ChartTooltipContent />} />
 
-              {showATLAS && entryZones?.map((ez, i) => (
-                <ReferenceArea key={`ez-${i}`} y1={ez.low} y2={ez.high} fill="hsl(175, 80%, 50%)" fillOpacity={0.08} />
-              ))}
-              {showATLAS && stopLevel && (
-                <ReferenceLine y={stopLevel} stroke="hsl(0, 72%, 55%)" strokeDasharray="4 2" strokeWidth={1}
-                  label={{ value: "Stop Loss", position: "left", fontSize: 9, fill: "hsl(0, 72%, 55%)" }} />
-              )}
-              {showATLAS && targets?.map((t, i) => (
-                <ReferenceLine key={`tp-${i}`} y={t.price} stroke="hsl(160, 80%, 48%)" strokeDasharray="4 2" strokeWidth={0.8}
-                  label={{ value: t.label, position: "left", fontSize: 9, fill: "hsl(160, 80%, 48%)" }} />
-              ))}
+                {showATLAS && entryZones?.map((ez, i) => (
+                  <ReferenceArea key={`ez-${i}`} y1={ez.low} y2={ez.high} fill="hsl(175, 80%, 50%)" fillOpacity={0.08} />
+                ))}
+                {showATLAS && stopLevel && (
+                  <ReferenceLine y={stopLevel} stroke="hsl(0, 72%, 55%)" strokeDasharray="4 2" strokeWidth={1}
+                    label={{ value: "Stop Loss", position: "left", fontSize: 9, fill: "hsl(0, 72%, 55%)" }} />
+                )}
+                {showATLAS && targets?.map((t, i) => (
+                  <ReferenceLine key={`tp-${i}`} y={t.price} stroke="hsl(160, 80%, 48%)" strokeDasharray="4 2" strokeWidth={0.8}
+                    label={{ value: t.label, position: "left", fontSize: 9, fill: "hsl(160, 80%, 48%)" }} />
+                ))}
 
-              <Customized component={CandlesLayer} />
-              {(!isSimple && showEMA) && (
-                <>
-                  <Line type="monotone" dataKey="ema20" stroke="hsl(175, 80%, 50%)" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
-                  <Line type="monotone" dataKey="ema50" stroke="hsl(45, 80%, 55%)" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
-                </>
-              )}
-            </ComposedChart>
-          </ResponsiveContainer>
+                <Customized component={CandlesLayer} />
+                {showEMA && (
+                  <>
+                    <Line type="monotone" dataKey="ema20" stroke="hsl(175, 80%, 50%)" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
+                    <Line type="monotone" dataKey="ema50" stroke="hsl(45, 80%, 55%)" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
+                  </>
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
 
           {/* Volume */}
           {!isSimple && showVolume && (
