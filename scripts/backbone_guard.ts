@@ -50,6 +50,14 @@ const PRICE_ENDPOINT_PATTERNS = [
   /\/data\/pricemultifull/,
 ];
 
+// WebSocket patterns to external exchange endpoints
+const WEBSOCKET_PATTERNS = [
+  /new\s+WebSocket\s*\(\s*[`'"]wss?:\/\/.*binance/i,
+  /new\s+WebSocket\s*\(\s*[`'"]wss?:\/\/.*coinbase/i,
+  /new\s+WebSocket\s*\(\s*[`'"]wss?:\/\/.*cryptocompare/i,
+  /new\s+WebSocket\s*\(\s*[`'"]wss?:\/\/.*coingecko/i,
+];
+
 function getAllTsFiles(dir: string, files: string[] = []): string[] {
   if (!fs.existsSync(dir)) return files;
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -84,7 +92,7 @@ function scanFile(filePath: string): Violation[] {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    for (const pattern of [...DISALLOWED_PATTERNS, ...PRICE_ENDPOINT_PATTERNS]) {
+    for (const pattern of [...DISALLOWED_PATTERNS, ...PRICE_ENDPOINT_PATTERNS, ...WEBSOCKET_PATTERNS]) {
       if (pattern.test(line)) {
         violations.push({
           file: filePath,

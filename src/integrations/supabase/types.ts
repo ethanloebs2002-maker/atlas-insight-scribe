@@ -377,6 +377,41 @@ export type Database = {
         }
         Relationships: []
       }
+      confidence_events: {
+        Row: {
+          created_at: string
+          decision_id: string | null
+          event_type: string
+          id: string
+          payload: Json | null
+          symbol: string
+        }
+        Insert: {
+          created_at?: string
+          decision_id?: string | null
+          event_type: string
+          id?: string
+          payload?: Json | null
+          symbol: string
+        }
+        Update: {
+          created_at?: string
+          decision_id?: string | null
+          event_type?: string
+          id?: string
+          payload?: Json | null
+          symbol?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "confidence_events_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       consensus_decisions: {
         Row: {
           agreement_rate: number
@@ -2211,7 +2246,11 @@ export type Database = {
         Row: {
           agreement_score: number
           asset_id: string
+          belief_p: number | null
           completeness_score: number
+          confidence_explain: Json | null
+          confidence_p: number | null
+          confidence_updated_at: string | null
           consensus_score: number
           correct: boolean | null
           created_at: string
@@ -2224,6 +2263,7 @@ export type Database = {
           entry_price: number | null
           evaluated_at: string | null
           evidence_snapshot_json: Json | null
+          execution_p: number | null
           horizon: string
           id: string
           probability_components: Json | null
@@ -2242,7 +2282,11 @@ export type Database = {
         Insert: {
           agreement_score?: number
           asset_id: string
+          belief_p?: number | null
           completeness_score?: number
+          confidence_explain?: Json | null
+          confidence_p?: number | null
+          confidence_updated_at?: string | null
           consensus_score?: number
           correct?: boolean | null
           created_at?: string
@@ -2255,6 +2299,7 @@ export type Database = {
           entry_price?: number | null
           evaluated_at?: string | null
           evidence_snapshot_json?: Json | null
+          execution_p?: number | null
           horizon?: string
           id?: string
           probability_components?: Json | null
@@ -2273,7 +2318,11 @@ export type Database = {
         Update: {
           agreement_score?: number
           asset_id?: string
+          belief_p?: number | null
           completeness_score?: number
+          confidence_explain?: Json | null
+          confidence_p?: number | null
+          confidence_updated_at?: string | null
           consensus_score?: number
           correct?: boolean | null
           created_at?: string
@@ -2286,6 +2335,7 @@ export type Database = {
           entry_price?: number | null
           evaluated_at?: string | null
           evidence_snapshot_json?: Json | null
+          execution_p?: number | null
           horizon?: string
           id?: string
           probability_components?: Json | null
@@ -2553,7 +2603,9 @@ export type Database = {
           initial_probability_pred: number | null
           initial_probability_source: string | null
           meta: Json
+          outcome: string | null
           outcome_label: string | null
+          outcome_reason: string | null
           policy_id: string | null
           qty: number
           realized_pct: number | null
@@ -2590,7 +2642,9 @@ export type Database = {
           initial_probability_pred?: number | null
           initial_probability_source?: string | null
           meta?: Json
+          outcome?: string | null
           outcome_label?: string | null
+          outcome_reason?: string | null
           policy_id?: string | null
           qty?: number
           realized_pct?: number | null
@@ -2627,7 +2681,9 @@ export type Database = {
           initial_probability_pred?: number | null
           initial_probability_source?: string | null
           meta?: Json
+          outcome?: string | null
           outcome_label?: string | null
+          outcome_reason?: string | null
           policy_id?: string | null
           qty?: number
           realized_pct?: number | null
@@ -3149,6 +3205,9 @@ export type Database = {
           avg_pnl_usd: number | null
           beta: number
           credibility: number
+          ema_winrate: number | null
+          expires: number | null
+          losses: number | null
           posterior_mean: number
           regime: string
           samples: number
@@ -3158,12 +3217,16 @@ export type Database = {
           timeframe: string
           updated_at: string
           win_rate: number | null
+          wins: number | null
         }
         Insert: {
           alpha?: number
           avg_pnl_usd?: number | null
           beta?: number
           credibility?: number
+          ema_winrate?: number | null
+          expires?: number | null
+          losses?: number | null
           posterior_mean?: number
           regime?: string
           samples?: number
@@ -3173,12 +3236,16 @@ export type Database = {
           timeframe?: string
           updated_at?: string
           win_rate?: number | null
+          wins?: number | null
         }
         Update: {
           alpha?: number
           avg_pnl_usd?: number | null
           beta?: number
           credibility?: number
+          ema_winrate?: number | null
+          expires?: number | null
+          losses?: number | null
           posterior_mean?: number
           regime?: string
           samples?: number
@@ -3188,6 +3255,7 @@ export type Database = {
           timeframe?: string
           updated_at?: string
           win_rate?: number | null
+          wins?: number | null
         }
         Relationships: []
       }

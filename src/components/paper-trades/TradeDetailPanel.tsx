@@ -7,10 +7,11 @@ import { useAssetAnalysis } from "@/hooks/use-crypto-data";
 import { useLivePrice } from "@/hooks/use-live-price";
 import type { TradeVM, PriceLevel } from "@/types/trade-vm";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Target, Bug, ChevronDown, BarChart3, Clock, Layers, Waves, Activity } from "lucide-react";
+import { Target, Bug, ChevronDown, BarChart3, Clock, Layers, Waves, Activity, Shield } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import HelpTooltip from "@/components/HelpTooltip";
 
 function fmtPrice(v: number | null | undefined): string {
   if (v == null) return "—";
@@ -107,6 +108,9 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
           )}
         </div>
       )}
+
+      {/* Confidence Breakdown */}
+      <ConfidenceBreakdown decisionId={vm.decisionId} />
 
       {/* Tabbed content */}
       <Tabs defaultValue="chart" className="min-w-0">
@@ -216,6 +220,83 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
         </CollapsibleContent>
       </Collapsible>
     </div>
+  );
+}
+
+// ─── Confidence Breakdown ────────────────────────────────────────
+
+function ConfidenceBreakdown({ decisionId }: { decisionId: string }) {
+  const { data: decision } = useQuery({
+    queryKey: ["confidence-breakdown", decisionId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("paper_decisions")
+        .select("belief_p, execution_p, confidence_p, confidence_explain, confidence_updated_at")
+        .eq("id", decisionId)
+        .maybeSingle();
+      return data;
+    },
+  });
+
+  if (!decision || decision.confidence_p == null) {
+    return (
+      <Card>
+        <CardContent className="py-2 px-3">
+          <div className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground">
+            <Shield className="h-3 w-3" />
+            Confidence not yet computed
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const explain = decision.confidence_explain as Record<string, any> | null;
+  const stale = explain?.execution_stale_blocked === true;
+  const beliefPct = Math.round((decision.belief_p ?? 0) * 100);
+  const execPct = Math.round((decision.execution_p ?? 0) * 100);
+  const confPct = Math.round((decision.confidence_p ?? 0) * 100);
+
+  return (
+    <Card>
+      <CardContent className="py-2 px-3 space-y-1.5">
+        <div className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground">
+          <Shield className="h-3 w-3" />
+          <span className="uppercase tracking-wider font-bold">Confidence Breakdown</span>
+          <HelpTooltip id="confidence-final" />
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="text-center">
+            <div className="text-[9px] font-mono text-muted-foreground flex items-center justify-center gap-0.5">
+              Belief <HelpTooltip id="confidence-belief" />
+            </div>
+            <div className="text-sm font-mono font-bold">{beliefPct}%</div>
+          </div>
+          <div className="text-center">
+            <div className="text-[9px] font-mono text-muted-foreground flex items-center justify-center gap-0.5">
+              Execution <HelpTooltip id="confidence-execution" />
+            </div>
+            <div className={`text-sm font-mono font-bold ${stale ? "text-bearish" : ""}`}>
+              {stale ? "STALE" : `${execPct}%`}
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-[9px] font-mono text-muted-foreground">Final</div>
+            <div className="text-sm font-mono font-bold text-primary">{confPct}%</div>
+          </div>
+        </div>
+        {stale && (
+          <div className="text-[8px] font-mono text-bearish">
+            Market data stale; confidence frozen.
+          </div>
+        )}
+        {explain?.staleness_ms != null && !stale && (
+          <div className="text-[8px] font-mono text-muted-foreground">
+            Backbone Freshness: {Math.round(explain.staleness_ms / 1000)}s ago
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
