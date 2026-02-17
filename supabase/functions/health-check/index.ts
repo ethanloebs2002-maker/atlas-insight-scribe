@@ -200,7 +200,12 @@ serve(async (req) => {
   const covDeriv = await snapshotCoverage("derivatives_context_snapshots");
   const covExec = await snapshotCoverage("execution_cost_snapshots");
 
-  checks.push(pass("Snapshot coverage (recent)", { covMarket, covDeriv, covExec }));
+  const derivCov = typeof covDeriv.coverage === "number" ? covDeriv.coverage : null;
+  if (derivCov !== null && derivCov < 0.5) {
+    checks.push(warn("Snapshot coverage (recent)", { covMarket, covDeriv, covExec, note: `Derivatives coverage ${(derivCov*100).toFixed(0)}% < 50%` }));
+  } else {
+    checks.push(pass("Snapshot coverage (recent)", { covMarket, covDeriv, covExec }));
+  }
 
   // ---------- G) Attribution proof
   if (recentPosIds.length === 0) {
