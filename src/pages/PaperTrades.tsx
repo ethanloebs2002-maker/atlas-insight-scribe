@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import HelpTooltip from "@/components/HelpTooltip";
 import { usePaperStats } from "@/hooks/use-paper-engine";
 import { buildTradeVM } from "@/lib/build-trade-vm";
 import type { TradeVM } from "@/types/trade-vm";
@@ -170,11 +171,48 @@ export default function PaperTrades() {
 
       {/* ─── SUMMARY CARDS ──────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 px-4 pt-3">
-        <SummaryCard label="Total Decisions" value={decisions.length} icon={<Target className="h-3 w-3" />} />
-        <SummaryCard label="Dir. Accuracy" value={`${dirAcc.toFixed(1)}%`} icon={<TrendingUp className="h-3 w-3" />} accent={dirAcc >= 65} />
-        <SummaryCard label="Avg R" value={avgR.toFixed(3)} icon={<TrendingUp className="h-3 w-3" />} accent={avgR > 0} />
-        <SummaryCard label="Win Rate" value={closedVMs.length > 0 ? `${((wins / closedVMs.length) * 100).toFixed(1)}%` : "—"} icon={<CheckCircle2 className="h-3 w-3" />} />
-        <SummaryCard label="Open / Pending" value={`${openVMs.length} / ${pendingVMs.length}`} icon={<Shield className="h-3 w-3" />} />
+        <SummaryCard
+          label={decisions.length >= 200 ? "Decisions (Showing Last 200)" : "Total Decisions"}
+          value={decisions.length}
+          icon={<Target className="h-3 w-3" />}
+          tooltipId={decisions.length >= 200 ? "metric-total-decisions-capped" : "metric-total-decisions"}
+          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+          window={decisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
+        />
+        <SummaryCard
+          label="Directional Accuracy"
+          value={`${dirAcc.toFixed(1)}%`}
+          icon={<TrendingUp className="h-3 w-3" />}
+          accent={dirAcc >= 65}
+          tooltipId="metric-directional-accuracy"
+          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+          window={decisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
+        />
+        <SummaryCard
+          label="Average Risk-Adjusted Return"
+          value={avgR.toFixed(3)}
+          icon={<TrendingUp className="h-3 w-3" />}
+          accent={avgR > 0}
+          tooltipId="metric-avg-r"
+          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+          window="Closed Trades"
+        />
+        <SummaryCard
+          label="Win Rate"
+          value={closedVMs.length > 0 ? `${((wins / closedVMs.length) * 100).toFixed(1)}%` : "—"}
+          icon={<CheckCircle2 className="h-3 w-3" />}
+          tooltipId="metric-win-rate"
+          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+          window="Closed Trades"
+        />
+        <SummaryCard
+          label="Open / Pending"
+          value={`${openVMs.length} / ${pendingVMs.length}`}
+          icon={<Shield className="h-3 w-3" />}
+          tooltipId="metric-open-pending"
+          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+          window="Current"
+        />
       </div>
 
       {/* ─── MAIN CONTENT ───────────────────────────────────── */}
@@ -558,14 +596,29 @@ function FastFeedbackCard({ stats }: { stats: any }) {
 
 // ─── SUB-COMPONENTS ──────────────────────────────────────────────
 
-function SummaryCard({ label, value, icon, accent }: { label: string; value: string | number; icon: React.ReactNode; accent?: boolean }) {
+function SummaryCard({ label, value, icon, accent, tooltipId, scope, window: timeWindow }: {
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+  accent?: boolean;
+  tooltipId?: string;
+  scope?: string;
+  window?: string;
+}) {
   return (
     <Card className="py-2 px-3">
       <div className="flex items-center gap-1.5 text-muted-foreground mb-0.5">
         {icon}
         <span className="text-[9px] font-mono uppercase truncate">{label}</span>
+        {tooltipId && <HelpTooltip id={tooltipId} iconSize="h-2.5 w-2.5" />}
       </div>
       <div className={`text-base font-mono font-bold ${accent ? "text-primary" : ""}`}>{value}</div>
+      {(scope || timeWindow) && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {scope && <span className="text-[7px] font-mono text-muted-foreground/60 bg-secondary/50 px-1 rounded">{scope}</span>}
+          {timeWindow && <span className="text-[7px] font-mono text-muted-foreground/60 bg-secondary/50 px-1 rounded">{timeWindow}</span>}
+        </div>
+      )}
     </Card>
   );
 }

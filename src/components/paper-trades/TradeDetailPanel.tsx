@@ -92,11 +92,11 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
             <span className="font-bold">{fmtPrice(vm.prices.filledEntry ?? vm.prices.plannedEntry)}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">TP</span>
+            <span className="text-muted-foreground">Take Profit</span>
             <span className="font-bold text-bullish">{fmtPrice(vm.prices.tp)}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">SL</span>
+            <span className="text-muted-foreground">Stop Loss</span>
             <span className="font-bold text-bearish">{fmtPrice(vm.prices.sl)}</span>
           </div>
           {vm.prices.live != null && (
@@ -157,7 +157,7 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
               </div>
               {vm.performance?.realizedR != null && (
                 <div className="mt-2 pt-2 border-t border-border flex justify-between text-[10px] font-mono">
-                  <span className="text-muted-foreground">Return R</span>
+                  <span className="text-muted-foreground">Risk-Adjusted Return</span>
                   <span className={vm.performance.realizedR >= 0 ? "text-bullish font-bold" : "text-bearish font-bold"}>
                     {vm.performance.realizedR.toFixed(3)}
                   </span>
@@ -165,7 +165,7 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
               )}
               {vm.performance?.realizedPnL != null && (
                 <div className="flex justify-between text-[10px] font-mono">
-                  <span className="text-muted-foreground">PnL</span>
+                  <span className="text-muted-foreground">Profit and Loss</span>
                   <span className={vm.performance.realizedPnL >= 0 ? "text-bullish font-bold" : "text-bearish font-bold"}>
                     ${vm.performance.realizedPnL.toFixed(2)}
                   </span>
