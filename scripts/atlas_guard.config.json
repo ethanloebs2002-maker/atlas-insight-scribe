@@ -1,0 +1,41 @@
+{
+  "allowedDuplicateGlobs": [
+    "**/__tests__/**",
+    "**/*.test.*",
+    "**/fixtures/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.vite/**",
+    "**/.next/**",
+    "**/public/**",
+    "**/assets/**"
+  ],
+  "canonicalSymbolNames": [
+    "getCanonicalMarketSnapshot",
+    "CanonicalMarketSnapshot",
+    "writeLedgerEntry",
+    "CANCEL_REASONS",
+    "LEDGER_ENTRY_TYPES"
+  ],
+  "canonicalFileHints": [
+    "backbone",
+    "market",
+    "ledger",
+    "execution",
+    "stateMachine"
+  ],
+  "forbiddenInUiExecution": [
+    "binance",
+    "getOrderBook",
+    "fetchTicker",
+    "ticker/price",
+    "ticker/bookTicker",
+    "futuresDepth",
+    "depth?symbol="
+  ],
+  "restrictedDirs": [
+    "src",
+    "scripts",
+    "supabase"
+  ]
+}
