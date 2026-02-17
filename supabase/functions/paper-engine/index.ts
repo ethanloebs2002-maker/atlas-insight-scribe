@@ -458,15 +458,95 @@ async function emitDecision(
           const latencyMs = policy?.latency_ms || 250;
           const decidedAt = decision.data.emitted_at ?? decision.data.ts ?? new Date().toISOString();
 
-          const { data: position } = await supabase.from("paper_positions").insert({
-            run_id: runId, policy_id: policy?.id, decision_id: decision.data.id,
-            symbol: assetId, side, timeframe, horizon, status: "PENDING_ENTRY", qty: 1,
-            stop_price: stopLevel, tp_price: tpLevel,
-            initial_probability_pred: policyProbability, initial_probability_source: isFallback ? "consensus_authority" : "indicator-engine",
-            regime_label: best.regime || "Unknown", duplicate_key: duplicateKey,
-            expires_at: isoPlusMs(decidedAt, entryTtlMs),
-            meta: { run_id: runId, entry_zone: { low: entryLow, high: entryHigh }, consensusAuthorityUsed: isFallback && consensusAuthority, syntheticLevels, entry_ttl_ms: entryTtlMs },
-          }).select().single();
+          // ── Risk Lab: determine risk variants ──
+          const riskLabEnabled = policy?.risk_lab_enabled ?? false;
+          const atrMults: number[] = policy?.risk_lab_atr_mults ?? [1.6];
+          const riskLabVariants = Math.min(policy?.risk_lab_variants ?? 1, 3);
+          const riskDist = Math.abs(entryPrice - stopLevel);
+
+          // Compute ATR-equivalent from original stop distance for rescaling
+          // originalMult is ~1.0 (the engine's organic stop); we create variants around it
+          const baseAtr = riskDist > 0 ? riskDist : entryPrice * 0.025;
+
+          // Determine how many siblings we can create given exposure
+          const exposure = await getExposure();
+          const remainingOpen = (policy?.max_open || 10) - exposure.open;
+          const remainingPending = (policy?.max_pending || 20) - exposure.pending;
+          const slotsAvailable = Math.min(remainingOpen, remainingPending);
+
+          // Build variant list
+          interface RiskVariantLocal { key: string; label: string; atr_mult: number; stopPrice: number; }
+          const variants: RiskVariantLocal[] = [];
+          if (riskLabEnabled && slotsAvailable >= 2 && riskLabVariants > 1) {
+            const mults = atrMults.slice(0, riskLabVariants);
+            for (const m of mults) {
+              const variantStop = side === "LONG"
+                ? entryPrice - baseAtr * m
+                : entryPrice + baseAtr * m;
+              variants.push({
+                key: `atr_${m.toFixed(1).replace(".", "p")}`,
+                label: m <= 1.3 ? "tight" : m <= 1.7 ? "medium" : "loose",
+                atr_mult: m,
+                stopPrice: variantStop,
+              });
+            }
+            // Trim to available slots
+            while (variants.length > slotsAvailable) variants.pop();
+          }
+
+          // If risk lab disabled or only 1 slot, use single position with default risk profile
+          if (variants.length === 0) {
+            variants.push({ key: "default", label: "default", atr_mult: 0, stopPrice: stopLevel });
+          }
+
+          // Get market context for entry tagging
+          let entryMid: number | null = null;
+          let entryBid: number | null = null;
+          let entryAsk: number | null = null;
+          let spreadBpsEntry: number | null = null;
+          let imbEntry: number | null = null;
+          let volRegimeEntry: string | null = null;
+          {
+            const { data: ob } = await supabase.from("latest_orderbook").select("bid_price, ask_price, spread_bps, imbalance").eq("symbol", assetId).maybeSingle();
+            if (ob) {
+              entryBid = ob.bid_price;
+              entryAsk = ob.ask_price;
+              entryMid = (ob.bid_price + ob.ask_price) / 2;
+              spreadBpsEntry = ob.spread_bps;
+              imbEntry = ob.imbalance;
+            }
+            const { data: mctx } = await supabase.from("market_context_snapshots").select("vol_regime").eq("symbol", assetId).order("snapshot_time", { ascending: false }).limit(1).maybeSingle();
+            volRegimeEntry = mctx?.vol_regime ?? "unknown";
+          }
+
+          // Create position for each variant (first variant is primary)
+          let primaryPosition: any = null;
+          for (let vi = 0; vi < variants.length; vi++) {
+            const rv = variants[vi];
+            const variantRR = Math.abs(tpLevel - entryPrice) / Math.abs(entryPrice - rv.stopPrice);
+            // Skip variant if R:R too low
+            if (rv.key !== "default" && variantRR < (policy?.min_rr || 1.2)) continue;
+
+            const { data: position } = await supabase.from("paper_positions").insert({
+              run_id: runId, policy_id: policy?.id, decision_id: decision.data.id,
+              symbol: assetId, side, timeframe, horizon, status: "PENDING_ENTRY", qty: 1,
+              stop_price: rv.stopPrice, tp_price: tpLevel,
+              initial_probability_pred: policyProbability, initial_probability_source: isFallback ? "consensus_authority" : "indicator-engine",
+              regime_label: best.regime || "Unknown", duplicate_key: vi === 0 ? duplicateKey : `${duplicateKey}:${rv.key}`,
+              expires_at: isoPlusMs(decidedAt, entryTtlMs),
+              risk_profile_key: rv.key !== "default" ? rv.key : null,
+              risk_profile: rv.key !== "default" ? { model: "atr", atr_mult: rv.atr_mult, label: rv.label, key: rv.key } : null,
+              vol_regime_at_entry: volRegimeEntry,
+              spread_bps_at_entry: spreadBpsEntry,
+              imbalance_at_entry: imbEntry,
+              entry_mid_price: entryMid,
+              entry_bid: entryBid,
+              entry_ask: entryAsk,
+              meta: { run_id: runId, entry_zone: { low: entryLow, high: entryHigh }, consensusAuthorityUsed: isFallback && consensusAuthority, syntheticLevels, entry_ttl_ms: entryTtlMs, risk_variant_index: vi, risk_variant_total: variants.length },
+            }).select().single();
+            if (vi === 0) primaryPosition = position;
+          }
+          const position = primaryPosition;
 
           if (position) {
             const { data: entryOrder } = await supabase.from("paper_orders").insert({
@@ -719,6 +799,55 @@ async function processExecution(assetId: string) {
     await emitEvent(pos.run_id, "POSITION", pos.id, "POSITION_CLOSED", {
       close_reason: closeReason, exit_price: effectiveExit, realized_pnl: pnl, realized_r: realizedR, outcome,
     });
+
+    // ── Risk Lab: update performance on close ──
+    if (pos.risk_profile_key) {
+      try {
+        const regime = pos.vol_regime_at_entry || "unknown";
+        const sBps = pos.spread_bps_at_entry;
+        const sBucket = sBps == null ? "normal" : sBps <= 2 ? "tight" : sBps <= 15 ? "normal" : "wide";
+        const win = pnl > 0 ? 1 : 0;
+        const loss = pnl <= 0 ? 1 : 0;
+        const decay = policy?.risk_lab_decay ?? 0.97;
+
+        // Upsert with decay
+        const { data: existing } = await supabase.from("risk_profile_performance")
+          .select("*")
+          .eq("symbol", pos.symbol).eq("timeframe", pos.timeframe)
+          .eq("regime", regime).eq("spread_bucket", sBucket)
+          .eq("risk_profile_key", pos.risk_profile_key)
+          .maybeSingle();
+
+        if (existing) {
+          const newTrades = Math.round(existing.trades * decay) + 1;
+          const newWins = Math.round(existing.wins * decay) + win;
+          const newLosses = Math.round(existing.losses * decay) + loss;
+          const newSumR = existing.sum_r * decay + realizedR;
+          const newSumPnl = existing.sum_pnl * decay + pnl;
+          await supabase.from("risk_profile_performance").update({
+            trades: newTrades, wins: newWins, losses: newLosses,
+            sum_r: newSumR, sum_pnl: newSumPnl,
+            avg_r: newTrades > 0 ? newSumR / newTrades : 0,
+            win_rate: newTrades > 0 ? newWins / newTrades : 0,
+            last_updated: new Date().toISOString(),
+          }).eq("id", existing.id);
+        } else {
+          await supabase.from("risk_profile_performance").insert({
+            symbol: pos.symbol, timeframe: pos.timeframe,
+            regime, spread_bucket: sBucket,
+            risk_profile_key: pos.risk_profile_key,
+            trades: 1, wins: win, losses: loss,
+            sum_r: realizedR, sum_pnl: pnl,
+            avg_r: realizedR, win_rate: win,
+          });
+        }
+
+        await emitEvent(pos.run_id, "ENGINE", pos.id, "RISK_LAB_UPDATE", {
+          risk_profile_key: pos.risk_profile_key, regime, spread_bucket: sBucket,
+          realized_pnl: pnl, realized_r: realizedR, outcome,
+        });
+      } catch (e) { console.warn("[risk-lab] update failed:", (e as Error).message); }
+    }
   }
 
   // Diagnostics event

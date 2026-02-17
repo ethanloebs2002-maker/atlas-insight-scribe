@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import {
   useStrategyBlueprints,
@@ -12,14 +13,22 @@ import {
   useStrategyEvolve,
   useStrategyReputationUpdate,
 } from "@/hooks/use-strategy-lab";
-import { Dna, FlaskConical, Zap, Trophy, ChevronRight, Play, Sparkles, RefreshCw } from "lucide-react";
+import { useRiskPerformance } from "@/hooks/use-risk-lab";
+import { Dna, FlaskConical, Zap, Trophy, ChevronRight, Play, Sparkles, RefreshCw, Shield } from "lucide-react";
 import { toast } from "sonner";
 
 export default function StrategyLab() {
   const { profile } = useAuth();
   const [selectedBp, setSelectedBp] = useState<string | null>(null);
+  const [riskSymbol, setRiskSymbol] = useState<string>("all");
+  const [riskRegime, setRiskRegime] = useState<string>("all");
   const { data: blueprints, isLoading } = useStrategyBlueprints();
   const { data: shadows } = useShadowSignals(selectedBp ?? undefined);
+  const { data: riskPerf } = useRiskPerformance(
+    riskSymbol !== "all" || riskRegime !== "all"
+      ? { ...(riskSymbol !== "all" ? { symbol: riskSymbol } : {}), ...(riskRegime !== "all" ? { regime: riskRegime } : {}) }
+      : undefined
+  );
   const tournamentTick = useTournamentTick();
   const evolve = useStrategyEvolve();
   const repUpdate = useStrategyReputationUpdate();
@@ -118,6 +127,9 @@ export default function StrategyLab() {
           </TabsTrigger>
           <TabsTrigger value="shadow" className="text-xs">
             <FlaskConical className="h-3 w-3 mr-1" /> Shadow vs Live
+          </TabsTrigger>
+          <TabsTrigger value="risklab" className="text-xs">
+            <Shield className="h-3 w-3 mr-1" /> Risk Lab
           </TabsTrigger>
         </TabsList>
 
@@ -313,6 +325,122 @@ export default function StrategyLab() {
                     <TableRow>
                       <TableCell colSpan={6} className="text-center font-mono text-xs text-muted-foreground py-8">
                         No shadow signals yet. Run a tournament tick to generate signals.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="risklab">
+          <div className="flex items-center gap-3 mb-4">
+            <Select value={riskSymbol} onValueChange={setRiskSymbol}>
+              <SelectTrigger className="w-[140px] font-mono text-xs h-8">
+                <SelectValue placeholder="Symbol" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Symbols</SelectItem>
+                <SelectItem value="BTCUSDT">BTC</SelectItem>
+                <SelectItem value="ETHUSDT">ETH</SelectItem>
+                <SelectItem value="SOLUSDT">SOL</SelectItem>
+                <SelectItem value="BNBUSDT">BNB</SelectItem>
+                <SelectItem value="XRPUSDT">XRP</SelectItem>
+                <SelectItem value="ADAUSDT">ADA</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={riskRegime} onValueChange={setRiskRegime}>
+              <SelectTrigger className="w-[140px] font-mono text-xs h-8">
+                <SelectValue placeholder="Regime" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Regimes</SelectItem>
+                <SelectItem value="compression">Compression</SelectItem>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="expansion">Expansion</SelectItem>
+                <SelectItem value="unknown">Unknown</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Card className="border-border bg-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="font-mono text-sm">Risk Profile Performance</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border">
+                    <TableHead className="font-mono text-xs">Symbol</TableHead>
+                    <TableHead className="font-mono text-xs">TF</TableHead>
+                    <TableHead className="font-mono text-xs">Regime</TableHead>
+                    <TableHead className="font-mono text-xs">Spread</TableHead>
+                    <TableHead className="font-mono text-xs">Profile</TableHead>
+                    <TableHead className="font-mono text-xs">Trades</TableHead>
+                    <TableHead className="font-mono text-xs">Win %</TableHead>
+                    <TableHead className="font-mono text-xs">Avg R</TableHead>
+                    <TableHead className="font-mono text-xs">Σ PnL</TableHead>
+                    <TableHead className="font-mono text-xs">Champion</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(riskPerf ?? []).map((r: any, i: number) => {
+                    // Determine if this is the champion for its group
+                    const isChampion = i === 0 || (
+                      (riskPerf ?? [])[i - 1]?.symbol !== r.symbol ||
+                      (riskPerf ?? [])[i - 1]?.timeframe !== r.timeframe ||
+                      (riskPerf ?? [])[i - 1]?.regime !== r.regime ||
+                      (riskPerf ?? [])[i - 1]?.spread_bucket !== r.spread_bucket
+                    );
+                    return (
+                      <TableRow key={r.id} className={`border-border ${isChampion ? "bg-primary/5" : ""}`}>
+                        <TableCell className="font-mono text-xs">{r.symbol}</TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">{r.timeframe}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="font-mono text-[10px]">{r.regime}</Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">{r.spread_bucket}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={`font-mono text-[10px] ${
+                              r.risk_profile_key?.includes("1p2") ? "text-bearish border-bearish/30" :
+                              r.risk_profile_key?.includes("2p0") ? "text-bullish border-bullish/30" :
+                              "text-primary border-primary/30"
+                            }`}
+                          >
+                            {r.risk_profile_key}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{r.trades}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          <span className={Number(r.win_rate) > 0.5 ? "text-bullish" : "text-bearish"}>
+                            {(Number(r.win_rate) * 100).toFixed(1)}%
+                          </span>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          <span className={Number(r.avg_r) > 0 ? "text-bullish" : "text-bearish"}>
+                            {Number(r.avg_r).toFixed(3)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          <span className={Number(r.sum_pnl) > 0 ? "text-bullish" : "text-bearish"}>
+                            ${Number(r.sum_pnl).toFixed(2)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {isChampion && r.trades >= 12 && (
+                            <Badge className="bg-primary/20 text-primary text-[9px] font-mono">★</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {!(riskPerf ?? []).length && (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center font-mono text-xs text-muted-foreground py-8">
+                        No risk performance data yet. Trades with risk profiles must close first.
                       </TableCell>
                     </TableRow>
                   )}
