@@ -32,11 +32,19 @@ const emptyConsensus: ConsensusData = {
   dataCompleteness: 0,
 };
 
+const TIMEFRAMES = [
+  { value: '1m', label: '1m' }, { value: '5m', label: '5m' },
+  { value: '15m', label: '15m' }, { value: '1h', label: '1H' },
+  { value: '4h', label: '4H' }, { value: '1d', label: '1D' },
+  { value: '1w', label: '1W' }, { value: '1M', label: '1M' },
+];
+
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
   const symbol = searchParams.get('symbol') || 'BTC';
   const [timeframe, setTimeframe] = useState('4h');
   const [chartModeOpen, setChartModeOpen] = useState(false);
+  const [chartView, setChartView] = useState<'simple' | 'advanced'>('simple');
   const { data: analysis, isLoading, isError } = useAssetAnalysis(symbol, timeframe);
 
   const asset = analysis?.asset || emptyAsset;
@@ -53,7 +61,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* System Status Banner */}
       <SystemStatusBanner asset={symbol} />
 
       {/* Data source indicator */}
@@ -89,7 +96,53 @@ export default function Dashboard() {
         <>
           <AssetHeader asset={asset} />
 
-          {/* Advanced Chart with indicators & ATLAS overlays */}
+          {/* Timeframe selector + view toggle — always visible outside chart */}
+          {(analysis?.chartData?.length || isLoading) && (
+            <div className="flex items-center justify-between">
+              {/* View toggle */}
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/50 p-0.5">
+                <button
+                  onClick={() => setChartView('simple')}
+                  className={`px-3 py-1 text-[10px] font-mono rounded-md transition-colors ${
+                    chartView === 'simple'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Simple
+                </button>
+                <button
+                  onClick={() => setChartView('advanced')}
+                  className={`px-3 py-1 text-[10px] font-mono rounded-md transition-colors ${
+                    chartView === 'advanced'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Advanced
+                </button>
+              </div>
+
+              {/* Timeframe pills */}
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/50 p-0.5">
+                {TIMEFRAMES.map(tf => (
+                  <button
+                    key={tf.value}
+                    onClick={() => setTimeframe(tf.value)}
+                    className={`px-2.5 py-1 text-[10px] font-mono rounded-md transition-colors ${
+                      timeframe === tf.value
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {tf.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chart */}
           {(analysis?.chartData?.length || isLoading) && (
             <div
               className="cursor-pointer"
@@ -101,6 +154,7 @@ export default function Dashboard() {
                 timeframe={timeframe}
                 onTimeframeChange={setTimeframe}
                 isLoading={isLoading}
+                chartView={chartView}
                 entryZones={bullScenario?.entryZones?.map(ez => ({ low: ez.priceRange[0], high: ez.priceRange[1] }))}
                 stopLevel={bullScenario?.stopLoss?.level}
                 targets={bullScenario?.targets?.map(t => ({ price: t.price, label: t.label }))}
