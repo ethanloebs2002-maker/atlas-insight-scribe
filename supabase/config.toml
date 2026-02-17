@@ -50,3 +50,9 @@ verify_jwt = false
 
 [functions.health-check]
 verify_jwt = false
+
+[functions.market-data-pump]
+verify_jwt = false
+
+[functions.market-data-read]
+verify_jwt = false

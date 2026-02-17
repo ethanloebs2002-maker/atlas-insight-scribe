@@ -1253,6 +1253,42 @@ export type Database = {
         }
         Relationships: []
       }
+      latest_orderbook: {
+        Row: {
+          ask_price: number
+          ask_size: number | null
+          bid_price: number
+          bid_size: number | null
+          captured_at: string
+          imbalance: number | null
+          source: string
+          spread_bps: number
+          symbol: string
+        }
+        Insert: {
+          ask_price: number
+          ask_size?: number | null
+          bid_price: number
+          bid_size?: number | null
+          captured_at?: string
+          imbalance?: number | null
+          source?: string
+          spread_bps: number
+          symbol: string
+        }
+        Update: {
+          ask_price?: number
+          ask_size?: number | null
+          bid_price?: number
+          bid_size?: number | null
+          captured_at?: string
+          imbalance?: number | null
+          source?: string
+          spread_bps?: number
+          symbol?: string
+        }
+        Relationships: []
+      }
       latest_prices: {
         Row: {
           captured_at: string
@@ -1474,6 +1510,36 @@ export type Database = {
             referencedColumns: ["symbol"]
           },
         ]
+      }
+      market_data_config: {
+        Row: {
+          created_at: string
+          id: string
+          orderbook_source: string
+          price_source: string
+          stale_ms_exec: number
+          stale_ms_ui: number
+          symbols: string[]
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          orderbook_source?: string
+          price_source?: string
+          stale_ms_exec?: number
+          stale_ms_ui?: number
+          symbols?: string[]
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          orderbook_source?: string
+          price_source?: string
+          stale_ms_exec?: number
+          stale_ms_ui?: number
+          symbols?: string[]
+        }
+        Relationships: []
       }
       maturity_states: {
         Row: {
