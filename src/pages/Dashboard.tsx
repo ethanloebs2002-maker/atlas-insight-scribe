@@ -6,6 +6,7 @@ import ScenarioCard from '@/components/ScenarioCard';
 import ConsensusReport from '@/components/ConsensusReport';
 import EvidenceTable from '@/components/EvidenceTable';
 import AdvancedChart from '@/components/AdvancedChart';
+import ChartMode from '@/components/ChartMode';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
 import { Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -35,6 +36,7 @@ export default function Dashboard() {
   const [searchParams] = useSearchParams();
   const symbol = searchParams.get('symbol') || 'BTC';
   const [timeframe, setTimeframe] = useState('4h');
+  const [chartModeOpen, setChartModeOpen] = useState(false);
   const { data: analysis, isLoading, isError } = useAssetAnalysis(symbol, timeframe);
 
   const asset = analysis?.asset || emptyAsset;
@@ -89,17 +91,35 @@ export default function Dashboard() {
 
           {/* Advanced Chart with indicators & ATLAS overlays */}
           {(analysis?.chartData?.length || isLoading) && (
-            <AdvancedChart
-              data={analysis?.chartData || []}
-              symbol={asset.symbol}
-              timeframe={timeframe}
-              onTimeframeChange={setTimeframe}
-              isLoading={isLoading}
-              entryZones={bullScenario?.entryZones?.map(ez => ({ low: ez.priceRange[0], high: ez.priceRange[1] }))}
-              stopLevel={bullScenario?.stopLoss?.level}
-              targets={bullScenario?.targets?.map(t => ({ price: t.price, label: t.label }))}
-            />
+            <div
+              className="cursor-pointer"
+              onClick={() => setChartModeOpen(true)}
+            >
+              <AdvancedChart
+                data={analysis?.chartData || []}
+                symbol={asset.symbol}
+                timeframe={timeframe}
+                onTimeframeChange={setTimeframe}
+                isLoading={isLoading}
+                entryZones={bullScenario?.entryZones?.map(ez => ({ low: ez.priceRange[0], high: ez.priceRange[1] }))}
+                stopLevel={bullScenario?.stopLoss?.level}
+                targets={bullScenario?.targets?.map(t => ({ price: t.price, label: t.label }))}
+              />
+            </div>
           )}
+
+          {/* Full-screen Chart Mode */}
+          <ChartMode
+            open={chartModeOpen}
+            onOpenChange={setChartModeOpen}
+            data={analysis?.chartData || []}
+            symbol={asset.symbol}
+            timeframe={timeframe}
+            onTimeframeChange={setTimeframe}
+            entryZones={bullScenario?.entryZones?.map(ez => ({ low: ez.priceRange[0], high: ez.priceRange[1] }))}
+            stopLevel={bullScenario?.stopLoss?.level}
+            targets={bullScenario?.targets?.map(t => ({ price: t.price, label: t.label }))}
+          />
 
           {/* Scenarios */}
           {scenarios.length > 0 && (
