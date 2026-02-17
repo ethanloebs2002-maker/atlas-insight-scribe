@@ -703,6 +703,11 @@ class PaperEngineCore {
     const realizedPct = entry > 0 ? (pnl / (entry * pos.qty)) * 100 : 0;
     const outcomeLabel = pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "BREAKEVEN";
 
+    // Map close_reason to canonical outcome
+    const outcomeMap: Record<string, string> = { TP: "TP", SL: "SL", EXPIRY: "EXPIRED", TIME_STOP: "EXPIRED" };
+    const outcome = outcomeMap[reason] ?? "UNKNOWN";
+    const outcomeReason = reason === "TP" ? "TAKE_PROFIT_HIT" : reason === "SL" ? "STOP_LOSS_HIT" : reason;
+
     await this.sb
       .from("paper_positions")
       .update({
@@ -714,6 +719,8 @@ class PaperEngineCore {
         realized_r: realizedR,
         realized_pct: realizedPct,
         outcome_label: outcomeLabel,
+        outcome,
+        outcome_reason: outcomeReason,
       })
       .eq("id", posId);
 
@@ -766,6 +773,8 @@ class PaperEngineCore {
             expired_at: this.candle.ts,
             expiry_reason: "EXPIRED_NO_FILL",
             realized_pnl: 0,
+            outcome: "EXPIRED",
+            outcome_reason: "ENTRY_NOT_TOUCHED",
           })
           .eq("id", pos.id);
 

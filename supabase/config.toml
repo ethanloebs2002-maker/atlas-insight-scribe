@@ -56,3 +56,6 @@ verify_jwt = false
 
 [functions.market-data-read]
 verify_jwt = false
+
+[functions.confidence-recalc]
+verify_jwt = false

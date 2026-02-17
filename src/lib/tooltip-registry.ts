@@ -170,6 +170,18 @@ const TOOLTIP_REGISTRY: Record<string, string> = {
     "Order book imbalance measures the ratio of buy-side to sell-side depth. Positive values suggest buying pressure.",
   "market-vol-regime":
     "Volatility regime classifies the current market environment based on realized and implied volatility metrics.",
+
+  // ─── Confidence v1 ─────────────────────────────────────────
+  "confidence-final":
+    "Final Confidence combines Belief (directional conviction) and Execution (fill probability) into a single score.",
+  "confidence-belief":
+    "Belief reflects how strongly the consensus thinks the predicted direction is correct, based on scenario analysis.",
+  "confidence-execution":
+    "Execution reflects how likely the proposed limit entry price is to be reached, given current spread and distance from the best available price.",
+  "confidence-stale":
+    "Market data is stale; confidence is frozen until fresh data arrives from the backbone.",
+  "backbone-freshness":
+    "Backbone Freshness shows how many seconds have elapsed since the last canonical orderbook snapshot was captured.",
 };
 
 export function getTooltip(id: string): string | undefined {
