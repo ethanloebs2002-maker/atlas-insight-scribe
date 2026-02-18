@@ -7,7 +7,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { insertAttributionForPosition } from "../_shared/attribution_insert.ts";
 import { defaultMaxHoldMs } from "../_shared/closedloop.ts";
-import { memoryWrite, newTraceId } from "../_shared/memory.ts";
+import { newTraceId } from "../_shared/memory.ts";
+import { memoryFanOut, type SourceEvent } from "../_shared/memory_fanout.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -510,43 +511,50 @@ class PaperEngineCore {
         fetch(`${supabaseUrl}/functions/v1/execution-cost-snap`, { method: "POST", headers, body: JSON.stringify({ ...base, notional_usd: notionalUsd, side: pos.side }) }),
       ]).catch(e => console.warn("[ctx-snap-fill] failed:", e.message));
 
-      // ── Memory: ENTRY_FILLED ──
+      // ── Memory: ENTRY_FILLED (full fan-out) ──
       const traceId = newTraceId();
-      const memEvents = [
-        {
-          trace_id: traceId,
-          position_id: posId,
-          decision_id: pos.decision_id,
-          symbol: this.symbol,
-          timeframe: pos.timeframe,
-          phase: "ENTRY_FILLED" as const,
-          source: "execution" as const,
-          payload: {
-            entry_price: avgPrice,
-            qty,
-            side: pos.side,
-            fill_candle_ts: this.candle.ts,
-          },
-        },
-        {
-          trace_id: traceId,
-          position_id: posId,
-          decision_id: pos.decision_id,
-          symbol: this.symbol,
-          timeframe: pos.timeframe,
-          phase: "ENTRY_FILLED" as const,
-          source: "market" as const,
-          payload: {
-            bid: entryUpdate.entry_bid ?? null,
-            ask: entryUpdate.entry_ask ?? null,
-            mid: entryUpdate.entry_mid_price ?? null,
-            spread_bps: entryUpdate.spread_bps_at_entry ?? null,
-            imbalance: entryUpdate.imbalance_at_entry ?? null,
-            vol_regime: entryUpdate.vol_regime_at_entry ?? null,
-          },
-        },
+      const fillCommon = { position_id: posId, decision_id: pos.decision_id, symbol: this.symbol, timeframe: pos.timeframe };
+
+      const fillSources: SourceEvent[] = [
+        { source: "execution", status: "OK", data: {
+          entry_price: avgPrice, qty, side: pos.side, fill_candle_ts: this.candle.ts,
+        }},
+        { source: "market", status: "OK", data: {
+          bid: entryUpdate.entry_bid ?? null, ask: entryUpdate.entry_ask ?? null,
+          mid: entryUpdate.entry_mid_price ?? null, spread_bps: entryUpdate.spread_bps_at_entry ?? null,
+          imbalance: entryUpdate.imbalance_at_entry ?? null, vol_regime: entryUpdate.vol_regime_at_entry ?? null,
+        }},
+        { source: "orderbook", status: entryUpdate.entry_bid ? "OK" : "MISSING", data: entryUpdate.entry_bid ? {
+          bid: entryUpdate.entry_bid, ask: entryUpdate.entry_ask, spread_bps: entryUpdate.spread_bps_at_entry, imbalance: entryUpdate.imbalance_at_entry,
+        } : undefined, reason: entryUpdate.entry_bid ? undefined : "orderbook not available at fill" },
+        { source: "consensus", status: "OK", data: { initial_probability: pos.initial_probability_pred, probability_source: pos.initial_probability_source } },
       ];
-      memoryWrite(memEvents, this.sb).catch(e => console.warn("[memory] ENTRY_FILLED failed:", e.message));
+
+      // Derivatives at fill
+      try {
+        const { data: deriv } = await this.sb.from("derivatives_context_snapshots").select("funding_rate,open_interest_usd").eq("symbol", this.symbol).order("snapshot_time", { ascending: false }).limit(1).maybeSingle();
+        if (deriv) fillSources.push({ source: "derivatives", status: "OK", data: { funding_rate: deriv.funding_rate, oi_usd: deriv.open_interest_usd } });
+        else fillSources.push({ source: "derivatives", status: "MISSING", reason: "no derivatives snapshot at fill" });
+      } catch { fillSources.push({ source: "derivatives", status: "FAILED", reason: "derivatives read failed at fill" }); }
+
+      // Policy at fill
+      try {
+        const { data: pol } = await this.sb.from("paper_policy").select("version_tag,min_prob,min_rr,fee_bps").eq("is_active", true).maybeSingle();
+        if (pol) fillSources.push({ source: "policy", status: "OK", data: { version_tag: pol.version_tag, fee_bps: pol.fee_bps } });
+        else fillSources.push({ source: "policy", status: "MISSING", reason: "no active policy at fill" });
+      } catch { fillSources.push({ source: "policy", status: "FAILED", reason: "policy read failed" }); }
+
+      // Risk lab
+      if (pos.risk_profile_key) {
+        fillSources.push({ source: "risk_lab", status: "OK", data: { risk_profile_key: pos.risk_profile_key } });
+      } else {
+        fillSources.push({ source: "risk_lab", status: "MISSING", reason: "no risk profile assigned" });
+      }
+
+      // whale, news, strategy auto-fill as MISSING via fan-out
+
+      memoryFanOut(this.sb, "ENTRY_FILLED", traceId, fillCommon, fillSources)
+        .catch(e => console.warn("[memory] ENTRY_FILLED fan-out failed:", e.message));
     }
 
     if (entryComplete) {
@@ -807,28 +815,57 @@ class PaperEngineCore {
         : null,
     });
 
-    // ── Memory: EXIT_CLOSED ──
+    // ── Memory: EXIT_CLOSED (full fan-out) ──
     const durationMs = pos.filled_at
       ? new Date(this.candle.ts).getTime() - new Date(pos.filled_at).getTime()
       : null;
-    memoryWrite({
-      trace_id: newTraceId(),
-      position_id: posId,
-      decision_id: pos.decision_id ?? undefined,
-      symbol: pos.symbol,
-      timeframe: pos.timeframe,
-      phase: "EXIT_CLOSED",
-      source: "execution",
-      payload: {
-        exit_price: exitPrice,
-        close_reason: reason,
-        realized_pnl: pnl,
-        realized_r: realizedR,
-        outcome,
-        outcome_label: outcomeLabel,
-        duration_ms: durationMs,
-      },
-    }, this.sb).catch(e => console.warn("[memory] EXIT_CLOSED failed:", e.message));
+
+    const exitTraceId = newTraceId();
+    const exitCommon = { position_id: posId, decision_id: pos.decision_id ?? undefined, symbol: pos.symbol, timeframe: pos.timeframe };
+
+    const exitSources: SourceEvent[] = [
+      { source: "execution", status: "OK", data: {
+        exit_price: exitPrice, close_reason: reason, realized_pnl: pnl,
+        realized_r: realizedR, outcome, outcome_label: outcomeLabel,
+        duration_ms: durationMs, strategy_blueprint_id: pos.strategy_blueprint_id ?? null,
+      }},
+      { source: "consensus", status: "OK", data: { initial_probability: pos.initial_probability_pred, direction: pos.side } },
+    ];
+
+    // Market at exit
+    try {
+      const { data: ob } = await this.sb.from("latest_orderbook").select("bid_price,ask_price,spread_bps,imbalance").eq("symbol", pos.symbol).maybeSingle();
+      if (ob) exitSources.push({ source: "market", status: "OK", data: { bid: ob.bid_price, ask: ob.ask_price, spread_bps: ob.spread_bps } });
+      else exitSources.push({ source: "market", status: "MISSING", reason: "no market data at exit" });
+      if (ob) exitSources.push({ source: "orderbook", status: "OK", data: { bid: ob.bid_price, ask: ob.ask_price, imbalance: ob.imbalance } });
+      else exitSources.push({ source: "orderbook", status: "MISSING", reason: "no orderbook at exit" });
+    } catch { exitSources.push({ source: "market", status: "FAILED", reason: "backbone read failed" }, { source: "orderbook", status: "FAILED", reason: "backbone read failed" }); }
+
+    // Derivatives at exit
+    try {
+      const { data: deriv } = await this.sb.from("derivatives_context_snapshots").select("funding_rate,open_interest_usd").eq("symbol", pos.symbol).order("snapshot_time", { ascending: false }).limit(1).maybeSingle();
+      if (deriv) exitSources.push({ source: "derivatives", status: "OK", data: { funding_rate: deriv.funding_rate, oi_usd: deriv.open_interest_usd } });
+      else exitSources.push({ source: "derivatives", status: "MISSING", reason: "no derivatives at exit" });
+    } catch { exitSources.push({ source: "derivatives", status: "FAILED", reason: "derivatives read failed" }); }
+
+    // Policy at exit
+    try {
+      const { data: pol } = await this.sb.from("paper_policy").select("version_tag").eq("is_active", true).maybeSingle();
+      if (pol) exitSources.push({ source: "policy", status: "OK", data: { version_tag: pol.version_tag } });
+      else exitSources.push({ source: "policy", status: "MISSING", reason: "no active policy at exit" });
+    } catch { exitSources.push({ source: "policy", status: "FAILED", reason: "policy read failed" }); }
+
+    // Risk lab at exit
+    if (pos.risk_profile_key) {
+      exitSources.push({ source: "risk_lab", status: "OK", data: { risk_profile_key: pos.risk_profile_key, realized_r: realizedR, realized_pnl: pnl } });
+    } else {
+      exitSources.push({ source: "risk_lab", status: "MISSING", reason: "no risk profile" });
+    }
+
+    // whale, news, strategy auto-fill as MISSING via fan-out
+
+    memoryFanOut(this.sb, "EXIT_CLOSED", exitTraceId, exitCommon, exitSources)
+      .catch(e => console.warn("[memory] EXIT_CLOSED fan-out failed:", e.message));
 
     // ── Risk Lab: update performance on close ──
     if (pos.risk_profile_key) {

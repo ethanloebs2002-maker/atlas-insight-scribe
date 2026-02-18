@@ -3,7 +3,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { insertWhaleContextSnapshot } from "../_shared/whale-context.ts";
 import { buildAttributionPayload } from "../_shared/attribution.ts";
 import { defaultEntryTtlMs, isoPlusMs } from "../_shared/closedloop.ts";
-import { memoryWrite, newTraceId } from "../_shared/memory.ts";
+import { newTraceId } from "../_shared/memory.ts";
+import { memoryFanOut, type SourceEvent } from "../_shared/memory_fanout.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -351,26 +352,54 @@ async function emitDecision(
 
       await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "TRADE_CANDIDATE", direction, probability, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
 
-      // ── Memory: DECISION_EMIT ──
+      // ── Memory: DECISION_EMIT (full fan-out) ──
       if (decision.data?.id) {
-        memoryWrite({
-          trace_id: newTraceId(),
-          decision_id: decision.data.id,
-          symbol: assetId,
-          timeframe,
-          phase: "DECISION_EMIT",
-          source: "consensus",
-          payload: {
+        const decTraceId = newTraceId();
+        const decCommon = { decision_id: decision.data.id, symbol: assetId, timeframe };
+
+        // Gather available source data
+        const decSources: SourceEvent[] = [
+          { source: "consensus", status: "OK", data: {
             direction, probability, policyProbability,
             consensus_score: context.consensusScore,
             agreement_score: context.agreementScore,
             completeness_score: context.completenessScore,
             scenario_type: best.type,
             consensus_authority: isFallback && consensusAuthority,
-            version_tag: VERSION_TAG,
-            horizon,
-          },
-        }, supabase).catch(e => console.warn("[memory] DECISION_EMIT failed:", e.message));
+            version_tag: VERSION_TAG, horizon,
+          }},
+          { source: "execution", status: "MISSING", reason: "not executed yet" },
+        ];
+
+        // Market + orderbook from backbone
+        try {
+          const { data: lp } = await supabase.from("latest_prices").select("price,captured_at").eq("symbol", assetId).maybeSingle();
+          const { data: ob } = await supabase.from("latest_orderbook").select("bid_price,ask_price,spread_bps,imbalance,captured_at").eq("symbol", assetId).maybeSingle();
+          if (lp) decSources.push({ source: "market", status: "OK", data: { price: lp.price, captured_at: lp.captured_at } });
+          else decSources.push({ source: "market", status: "MISSING", reason: "no price data" });
+          if (ob) decSources.push({ source: "orderbook", status: "OK", data: { bid: ob.bid_price, ask: ob.ask_price, spread_bps: ob.spread_bps, imbalance: ob.imbalance } });
+          else decSources.push({ source: "orderbook", status: "MISSING", reason: "no orderbook data" });
+        } catch { decSources.push({ source: "market", status: "FAILED", reason: "backbone read error" }, { source: "orderbook", status: "FAILED", reason: "backbone read error" }); }
+
+        // Derivatives
+        try {
+          const { data: deriv } = await supabase.from("derivatives_context_snapshots").select("funding_rate,open_interest_usd").eq("symbol", assetId).order("snapshot_time", { ascending: false }).limit(1).maybeSingle();
+          if (deriv) decSources.push({ source: "derivatives", status: "OK", data: { funding_rate: deriv.funding_rate, open_interest_usd: deriv.open_interest_usd } });
+          else decSources.push({ source: "derivatives", status: "MISSING", reason: "no derivatives snapshot" });
+        } catch { decSources.push({ source: "derivatives", status: "FAILED", reason: "derivatives read failed" }); }
+
+        // Policy
+        try {
+          const pol = await getActivePolicy();
+          if (pol) decSources.push({ source: "policy", status: "OK", data: { version_tag: pol.version_tag, min_prob: pol.min_prob, min_rr: pol.min_rr } });
+          else decSources.push({ source: "policy", status: "MISSING", reason: "no active policy" });
+        } catch { decSources.push({ source: "policy", status: "FAILED", reason: "policy read failed" }); }
+
+        // Whale, news, risk_lab, strategy — may not have data at decision time
+        // These will auto-fill as MISSING by the fan-out helper
+
+        memoryFanOut(supabase, "DECISION_EMIT", decTraceId, decCommon, decSources)
+          .catch(e => console.warn("[memory] DECISION_EMIT fan-out failed:", e.message));
       }
 
       // ── Hook A: Context snapshots on decision emission ──

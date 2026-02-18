@@ -448,6 +448,7 @@ export type Database = {
           description: string
           is_active: boolean
           owner_module: string
+          required_at_phases: string[]
           source: string
         }
         Insert: {
@@ -455,6 +456,7 @@ export type Database = {
           description: string
           is_active?: boolean
           owner_module: string
+          required_at_phases?: string[]
           source: string
         }
         Update: {
@@ -462,6 +464,7 @@ export type Database = {
           description?: string
           is_active?: boolean
           owner_module?: string
+          required_at_phases?: string[]
           source?: string
         }
         Relationships: []
