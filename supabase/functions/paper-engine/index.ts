@@ -184,7 +184,8 @@ async function recordDecision(body: any) {
 
 // ─── CADENCE GUARD ───────────────────────────────────────────────
 async function checkCadenceGuard(emittedBy: string): Promise<{ allowed: boolean; reason?: string }> {
-  if (emittedBy === "MANUAL_EVALUATE") return { allowed: true };
+  // MANUAL and AUTO_EVAL bypass per-call cadence — auto-eval manages its own cadence via cron schedule
+  if (emittedBy === "MANUAL_EVALUATE" || emittedBy === "AUTO_EVAL") return { allowed: true };
   const { data: settings } = await supabase.from("atlas_settings").select("*").eq("id", "global").maybeSingle();
   if (!settings) return { allowed: true };
   const cadenceMs = settings.eval_cadence_ms || 3600000;
