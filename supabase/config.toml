@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.strategy-evolve]
 verify_jwt = false
+
+[functions.memory-write]
+verify_jwt = false

@@ -275,6 +275,122 @@ export type Database = {
         }
         Relationships: []
       }
+      atlas_memory_events: {
+        Row: {
+          created_at: string
+          decision_id: string | null
+          id: string
+          payload: Json
+          phase: string
+          position_id: string | null
+          source: string
+          symbol: string
+          timeframe: string | null
+          trace_id: string
+          ts: string
+        }
+        Insert: {
+          created_at?: string
+          decision_id?: string | null
+          id?: string
+          payload?: Json
+          phase: string
+          position_id?: string | null
+          source: string
+          symbol: string
+          timeframe?: string | null
+          trace_id: string
+          ts?: string
+        }
+        Update: {
+          created_at?: string
+          decision_id?: string | null
+          id?: string
+          payload?: Json
+          phase?: string
+          position_id?: string | null
+          source?: string
+          symbol?: string
+          timeframe?: string | null
+          trace_id?: string
+          ts?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "atlas_memory_events_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "paper_decisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "atlas_memory_events_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "paper_positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "atlas_memory_events_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_atlas_v3_trade_entry_context"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "atlas_memory_events_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_market_context_trade_outcome"
+            referencedColumns: ["trade_id"]
+          },
+          {
+            foreignKeyName: "atlas_memory_events_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_closed"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "atlas_memory_events_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_positions_open"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "atlas_memory_events_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "v_whale_trade_outcome_analysis"
+            referencedColumns: ["trade_id"]
+          },
+        ]
+      }
+      atlas_memory_sources: {
+        Row: {
+          created_at: string
+          description: string
+          is_active: boolean
+          owner_module: string
+          source: string
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          is_active?: boolean
+          owner_module: string
+          source: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          is_active?: boolean
+          owner_module?: string
+          source?: string
+        }
+        Relationships: []
+      }
       atlas_settings: {
         Row: {
           eval_cadence_ms: number

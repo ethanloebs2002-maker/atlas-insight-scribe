@@ -7,7 +7,8 @@ import { useAssetAnalysis } from "@/hooks/use-crypto-data";
 import { useLivePrice } from "@/hooks/use-live-price";
 import type { TradeVM, PriceLevel } from "@/types/trade-vm";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Target, Bug, ChevronDown, BarChart3, Clock, Layers, Waves, Activity, Shield } from "lucide-react";
+import { Target, Bug, ChevronDown, BarChart3, Clock, Layers, Waves, Activity, Shield, Brain } from "lucide-react";
+import { MemoryTimeline } from "@/components/paper-trades/MemoryTimeline";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -123,6 +124,7 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
           <TabsTrigger value="levels" className="text-[10px] gap-1"><Layers className="h-3 w-3" />Levels</TabsTrigger>
           <TabsTrigger value="whale" className="text-[10px] gap-1"><Waves className="h-3 w-3" />Whale</TabsTrigger>
           <TabsTrigger value="market" className="text-[10px] gap-1"><Activity className="h-3 w-3" />Market</TabsTrigger>
+          <TabsTrigger value="memory" className="text-[10px] gap-1"><Brain className="h-3 w-3" />Memory</TabsTrigger>
         </TabsList>
 
         {/* Chart Tab */}
@@ -190,6 +192,21 @@ export default function TradeDetailPanel({ vm }: { vm: TradeVM | null }) {
         {/* Market Context Tab */}
         <TabsContent value="market" className="mt-3">
           <MarketContextCard tradeId={vm.id} decisionId={vm.decisionId} />
+        </TabsContent>
+
+        {/* Memory Tab */}
+        <TabsContent value="memory" className="mt-3">
+          <Card>
+            <CardHeader className="py-2 px-3">
+              <CardTitle className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Brain className="h-3 w-3" />
+                Memory Timeline
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-3 pb-3">
+              <MemoryTimeline positionId={vm.id} />
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
