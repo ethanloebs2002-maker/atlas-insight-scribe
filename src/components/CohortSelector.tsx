@@ -5,7 +5,8 @@ import { Switch } from "@/components/ui/switch";
 export default function CohortSelector() {
   const { cohortId, setCohortId, mode, setMode, includeLegacy, setIncludeLegacy } = useCohort();
 
-  const selectorValue = mode === "all" ? "__all__" : (cohortId ?? "__all__");
+  const selectorValue = mode === "all" ? "__all__" : (cohortId ?? COHORTS.brain);
+  const isBrain = mode !== "all" && cohortId === COHORTS.brain;
 
   return (
     <div className="flex items-center gap-2">
@@ -30,14 +31,16 @@ export default function CohortSelector() {
         </SelectContent>
       </Select>
 
-      <div className="flex items-center gap-1">
-        <span className="text-[9px] font-mono text-muted-foreground">+Legacy</span>
-        <Switch
-          checked={includeLegacy}
-          onCheckedChange={setIncludeLegacy}
-          className="scale-75"
-        />
-      </div>
+      {isBrain && (
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] font-mono text-muted-foreground">+Legacy</span>
+          <Switch
+            checked={includeLegacy}
+            onCheckedChange={setIncludeLegacy}
+            className="scale-75"
+          />
+        </div>
+      )}
     </div>
   );
 }
