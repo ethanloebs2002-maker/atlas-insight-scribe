@@ -279,14 +279,20 @@ export type Database = {
         Row: {
           id: number
           last_ts: string
+          lock_owner: string | null
+          locked_until: string | null
         }
         Insert: {
           id?: number
           last_ts?: string
+          lock_owner?: string | null
+          locked_until?: string | null
         }
         Update: {
           id?: number
           last_ts?: string
+          lock_owner?: string | null
+          locked_until?: string | null
         }
         Relationships: []
       }
