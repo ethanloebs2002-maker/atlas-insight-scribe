@@ -23,6 +23,9 @@ const VIRTUAL_EQUITY_USD = 100_000;
 const MAX_RISK_PER_TRADE_PCT = 0.0075;  // 0.75%
 const MAX_PORTFOLIO_RISK_PCT = 0.04;    // 4.0%
 
+// ─── HARD FAILSAFE (never the primary gate) ──────────────────────
+const MAX_OPEN_FAILSAFE = 100; // absolute ceiling on OPEN non-legacy positions
+
 // ─── HORIZON ROUTER ──────────────────────────────────────────────
 type HorizonTF = "15m" | "30m" | "1h" | "4h" | "1d";
 type Horizon = "4h" | "6h" | "12h" | "24h" | "72h";
@@ -571,6 +574,9 @@ async function emitDecision(
         let gateEV: number | null = null;
         let gateExposure: { open: number; pending: number; openNonLegacy: number; portfolioRiskUsd: number } | null = null;
         let riskClampedQty: number | null = null;
+        let newTradeRiskUsd: number | null = null;
+        let portfolioRiskCapUsd: number | null = null;
+        let riskCapUsd: number | null = null;
 
         if (policy) {
           if (policyProbability < (policy.min_prob || 0.35)) rejectionReasons.push(`policy_prob ${policyProbability.toFixed(3)} < min_prob ${policy.min_prob}`);
@@ -588,23 +594,23 @@ async function emitDecision(
             rejectionReasons.push("STOP_DISTANCE_INVALID");
           } else {
             // Per-trade risk cap → clamp qty
-            const riskCapUsd = VIRTUAL_EQUITY_USD * MAX_RISK_PER_TRADE_PCT;
+            riskCapUsd = VIRTUAL_EQUITY_USD * MAX_RISK_PER_TRADE_PCT;
             const maxQtyByRisk = riskCapUsd / riskDist;
             riskClampedQty = Math.min(1, maxQtyByRisk); // default qty=1, clamp down
             if (riskClampedQty <= 0.0001) {
               rejectionReasons.push("RISK_CAP_CLAMPED_TO_ZERO");
             }
 
-            // Portfolio risk gate
-            const newTradeRiskUsd = riskClampedQty * riskDist;
-            const portfolioRiskCap = VIRTUAL_EQUITY_USD * MAX_PORTFOLIO_RISK_PCT;
-            if (exposure.portfolioRiskUsd + newTradeRiskUsd > portfolioRiskCap) {
-              rejectionReasons.push(`PORTFOLIO_RISK_CAP (current=${exposure.portfolioRiskUsd.toFixed(0)}, new=${newTradeRiskUsd.toFixed(0)}, cap=${portfolioRiskCap.toFixed(0)})`);
+            // Portfolio risk gate (PRIMARY blocker)
+            newTradeRiskUsd = riskClampedQty * riskDist;
+            portfolioRiskCapUsd = VIRTUAL_EQUITY_USD * MAX_PORTFOLIO_RISK_PCT;
+            if (exposure.portfolioRiskUsd + newTradeRiskUsd > portfolioRiskCapUsd) {
+              rejectionReasons.push(`PORTFOLIO_RISK_CAP (current=${exposure.portfolioRiskUsd.toFixed(0)}, new=${newTradeRiskUsd.toFixed(0)}, cap=${portfolioRiskCapUsd.toFixed(0)})`);
             }
           }
 
-          // Safety max_open (generous fallback, not the primary gate)
-          if (exposure.openNonLegacy >= (policy.max_open || 10)) rejectionReasons.push(`max_open reached: ${exposure.openNonLegacy} (non-legacy)`);
+          // Absolute failsafe only: prevent runaway engine (not the primary gate)
+          if (exposure.openNonLegacy >= MAX_OPEN_FAILSAFE) rejectionReasons.push(`FAILSAFE_MAX_OPEN (${exposure.openNonLegacy} >= ${MAX_OPEN_FAILSAFE})`);
           if (exposure.pending >= (policy.max_pending || 20)) rejectionReasons.push(`max_pending reached: ${exposure.pending}`);
 
           const rr = riskDist > 0 ? rewardDist / riskDist : 0;
@@ -648,8 +654,15 @@ async function emitDecision(
                 exposure_open: gateExposure?.open ?? null,
                 exposure_open_nonlegacy: gateExposure?.openNonLegacy ?? null,
                 exposure_pending: gateExposure?.pending ?? null,
+                // Portfolio risk observability
                 portfolio_risk_usd: gateExposure?.portfolioRiskUsd ?? null,
+                new_trade_risk_usd: newTradeRiskUsd,
+                max_portfolio_risk_usd: portfolioRiskCapUsd,
+                // Trade sizing observability
+                risk_cap_usd: riskCapUsd,
                 risk_clamped_qty: riskClampedQty,
+                // Hard backstop observability
+                max_open_failsafe: MAX_OPEN_FAILSAFE,
                 virtual_equity: VIRTUAL_EQUITY_USD,
                 max_risk_per_trade_pct: MAX_RISK_PER_TRADE_PCT,
                 max_portfolio_risk_pct: MAX_PORTFOLIO_RISK_PCT,
