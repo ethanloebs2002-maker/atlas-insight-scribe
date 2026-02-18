@@ -358,6 +358,14 @@ async function emitDecision(
         const decCommon = { decision_id: decision.data.id, symbol: assetId, timeframe };
 
         // Gather available source data
+        // Build scenario keys + weights for Brain (Memory-only learning)
+        const attributionScenarios = buildAttributionPayload(context.scenarios ?? []);
+        const scenarioKeys = attributionScenarios.map(s => s.scenario_key);
+        const scenarioWeights: Record<string, number> = {};
+        for (const s of attributionScenarios) {
+          if (s.contributed_confidence != null) scenarioWeights[s.scenario_key] = s.contributed_confidence;
+        }
+
         const decSources: SourceEvent[] = [
           { source: "consensus", status: "OK", data: {
             direction, probability, policyProbability,
@@ -367,6 +375,11 @@ async function emitDecision(
             scenario_type: best.type,
             consensus_authority: isFallback && consensusAuthority,
             version_tag: VERSION_TAG, horizon,
+            // Brain-required fields (scenario attribution via Memory)
+            scenario_keys: scenarioKeys,
+            scenario_weights: scenarioWeights,
+            regime: best.regime || null,
+            strategy_blueprint_id: null, // populated when strategy selection exists
           }},
           { source: "execution", status: "MISSING", reason: "not executed yet" },
         ];

@@ -2,7 +2,8 @@
  * ATLAS Brain Guard — Static analysis for Brain pillar integrity.
  *
  * Ensures:
- * 1. Learning functions read from atlas_memory_events, NOT directly from paper_positions/paper_decisions
+ * 1. Learning functions read from atlas_memory_events, NOT directly from
+ *    paper_positions/paper_decisions/attribution/sensor tables
  * 2. Brain output tables are only written by approved brain functions
  * 3. No silent feedback loops bypass the Memory → Brain → Policy chain
  *
@@ -40,7 +41,7 @@ const BRAIN_OUTPUT_TABLES: Record<string, string[]> = {
   ],
 };
 
-// ── Learning functions that MUST read from Memory, NOT paper_positions ─
+// ── Learning functions that MUST read from Memory, NOT other tables ───
 const LEARNING_FUNCTIONS = [
   "supabase/functions/brain-update/",
   "supabase/functions/scenario-reputation-update/",
@@ -48,9 +49,20 @@ const LEARNING_FUNCTIONS = [
 ];
 
 // Tables that learning functions should NOT read directly from
+// Brain must learn from Memory representation only.
 const FORBIDDEN_DIRECT_READS = [
+  // Attribution tables — scenarios come from Memory consensus payload
+  "trade_scenario_attribution",
+  // Position/decision tables — outcomes come from Memory execution payload
   "paper_positions",
   "paper_decisions",
+  // Sensor tables — Brain must not consult raw sensors
+  "market_context_snapshots",
+  "derivatives_context_snapshots",
+  "execution_cost_snapshots",
+  // Backbone tables — Brain must not consult market data directly
+  "latest_prices",
+  "latest_orderbook",
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -115,7 +127,7 @@ for (const [table, allowed] of Object.entries(BRAIN_OUTPUT_TABLES)) {
   }
 }
 
-// Check 2: Learning functions reading directly from paper_positions/paper_decisions
+// Check 2: Learning functions reading directly from forbidden tables
 for (const funcPath of LEARNING_FUNCTIONS) {
   const funcFiles = allFiles.filter(f => normalize(f).includes(funcPath));
   for (const file of funcFiles) {
@@ -152,5 +164,7 @@ if (violations.length > 0) {
   process.exit(1);
 } else {
   console.log("✅ Brain Guard passed — no violations found.");
+  console.log(`   ✓ Forbidden direct reads: ${FORBIDDEN_DIRECT_READS.length} tables blocked from learning functions`);
+  console.log(`   ✓ Brain output tables: ${Object.keys(BRAIN_OUTPUT_TABLES).length} tables write-protected`);
   process.exit(0);
 }
