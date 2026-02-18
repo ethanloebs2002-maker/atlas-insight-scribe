@@ -1225,13 +1225,22 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     gradQuery = gradQuery.eq("asset_id", asset_id);
   }
 
-  // Fetch positions (new system) + events + policy
-  let positionsQuery = supabase.from("paper_positions").select("*").order("created_at", { ascending: false }).limit(200);
+  // Fetch positions: ALL active (never miss live state) + recent closed (windowed)
+  let posActiveQuery = supabase.from("paper_positions").select("*")
+    .in("status", ["OPEN", "PENDING_ENTRY"])
+    .order("created_at", { ascending: false });
+  let posClosedQuery = supabase.from("paper_positions").select("*")
+    .eq("status", "CLOSED")
+    .order("closed_at", { ascending: false })
+    .limit(200);
   let eventsQuery = supabase.from("paper_engine_events").select("*").order("ts", { ascending: false }).limit(100);
-  if (asset_id) positionsQuery = positionsQuery.eq("symbol", asset_id);
+  if (asset_id) {
+    posActiveQuery = posActiveQuery.eq("symbol", asset_id);
+    posClosedQuery = posClosedQuery.eq("symbol", asset_id);
+  }
 
-  const [decisions, trades, graduation, positions, events] = await Promise.all([
-    decisionsQuery, tradesQuery, gradQuery, positionsQuery, eventsQuery,
+  const [decisions, trades, graduation, posActive, posClosed, events] = await Promise.all([
+    decisionsQuery, tradesQuery, gradQuery, posActiveQuery, posClosedQuery, eventsQuery,
   ]);
 
   const { data: policyData } = await supabase.from("paper_policy").select("*").eq("is_active", true).order("created_at", { ascending: false }).limit(1);
@@ -1278,8 +1287,8 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
     confusionMatrix, maeDistribution, bhHorizonStats,
     lastRun: lastRunData?.[0] || null, timeframeStats: tfStatsData || [], bestTimeframe: bestTf,
     config: { publicHorizons: PUBLIC_HORIZONS, learningHorizons: LEARNING_HORIZONS, cadenceMap: CADENCE_MAP },
-    // New exchange fields
-    positions: positions.data || [],
+    // Merge active (all) + closed (recent) into one positions array
+    positions: [...(posActive.data || []), ...(posClosed.data || [])],
     events: events.data || [],
     policy: policyData?.[0] || null,
   };
