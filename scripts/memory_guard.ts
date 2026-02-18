@@ -218,7 +218,7 @@ if (tickFile) {
   }
 
   const closedUpdatePattern =
-    /\.from\(\s*['"`]paper_positions['"`]\s*\)\s*\.update\(\s*\{[^}]*status\s*:\s*['"`]CLOSED['"`]/gs;
+    /\.from\(\s*['"`]paper_positions['"`]\s*\)\s*\.update\(\s*\{[\s\S]*?status\s*:\s*['"`]CLOSED['"`]/g;
   const matches = [...content.matchAll(closedUpdatePattern)];
 
   for (const m of matches) {
