@@ -5135,6 +5135,15 @@ export type Database = {
       }
     }
     Functions: {
+      brain_acquire_lease: {
+        Args: { p_lease_seconds?: number; p_owner: string }
+        Returns: boolean
+      }
+      brain_release_lease: { Args: { p_owner: string }; Returns: boolean }
+      brain_renew_lease: {
+        Args: { p_lease_seconds?: number; p_owner: string }
+        Returns: boolean
+      }
       compute_transfer_decay: {
         Args: {
           current_local_decisions: number
