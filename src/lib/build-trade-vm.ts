@@ -1,6 +1,9 @@
 import type { TradeVM, UIStatus, PriceLevel } from "@/types/trade-vm";
 import { routeScenarioWindow } from "@/lib/horizon-router";
 
+// Re-export for convenience
+export type { TradeVM };
+
 /** Raw decision row from paper_decisions */
 interface DecisionRow {
   id: string;
@@ -225,5 +228,76 @@ export function buildTradeVM(
       entrySourceReason,
       gating: decision.evidence_snapshot_json?.gating ?? undefined,
     },
+  };
+}
+
+/**
+ * Build a TradeVM directly from a position row (position-first).
+ * Used when the parent decision may not be in the fetched window.
+ * Falls back to position-only data when decision is unavailable.
+ */
+export function buildTradeVMFromPosition(
+  position: PositionRow,
+  decision?: DecisionRow | null,
+  livePrice?: number | null,
+): TradeVM {
+  // If we have the decision, use the canonical builder
+  if (decision) {
+    return buildTradeVM(decision, position, livePrice);
+  }
+
+  // Position-only VM
+  const status: UIStatus =
+    position.status === "CLOSED" ? "CLOSED" :
+    position.status === "OPEN" ? "OPEN" : "PENDING_ENTRY";
+
+  const side: "LONG" | "SHORT" = position.side === "SHORT" ? "SHORT" : "LONG";
+  const entry = num(position.entry_price);
+  const tp = num(position.tp_price);
+  const sl = num(position.stop_price);
+  const exitPrice = num(position.exit_price);
+
+  const entryLevel: PriceLevel = entry != null
+    ? { value: entry, label: "Filled Entry", source: "FILL", kind: "ENTRY", style: "solid" }
+    : { value: null, label: "Entry (unknown)", source: "POSITION", kind: "ENTRY", style: "ghost" };
+
+  const tpLevel: PriceLevel = { value: tp, label: tp != null ? "Take Profit" : "TP (unknown)", source: "ORDER", kind: "TP", style: tp != null ? "solid" : "ghost" };
+  const slLevel: PriceLevel = { value: sl, label: sl != null ? "Stop Loss" : "SL (unknown)", source: "ORDER", kind: "SL", style: sl != null ? "solid" : "ghost" };
+  const liveLevel: PriceLevel = { value: livePrice ?? null, label: "Live", source: "MARKET", kind: "LIVE", style: livePrice != null ? "solid" : "ghost" };
+  const exitLevel: PriceLevel | undefined = exitPrice != null
+    ? { value: exitPrice, label: "Exit", source: "FILL", kind: "EXIT", style: "solid" }
+    : undefined;
+
+  const realizedPnL = num(position.realized_pnl);
+  const realizedR = num(position.realized_r);
+  const closeOutcome = outcomeFromReason(position.close_reason);
+  let isWin: boolean | null = null;
+  if (realizedPnL != null) isWin = realizedPnL > 0;
+
+  const performance: TradeVM["performance"] =
+    status === "CLOSED"
+      ? { realizedPnL, realizedR, outcome: closeOutcome, isWin }
+      : undefined;
+
+  return {
+    id: position.id,
+    decisionId: position.decision_id ?? position.id,
+    symbol: position.symbol,
+    timeframe: position.timeframe ?? "4h",
+    horizon: position.horizon ?? "24h",
+    side,
+    status,
+    probability: { initial: 0, displayPct: 0, source: "unavailable" },
+    timestamps: {
+      decidedAt: position.created_at,
+      entryPlacedAt: position.created_at,
+      entryFilledAt: position.filled_at ?? null,
+      closedAt: position.closed_at ?? null,
+      expiresAt: position.expires_at ?? null,
+    },
+    prices: { plannedEntry: entry, filledEntry: entry, live: livePrice ?? null, tp, sl, exit: exitPrice },
+    levels: { entry: entryLevel, tp: tpLevel, sl: slLevel, live: liveLevel, ...(exitLevel ? { exit: exitLevel } : {}) },
+    performance,
+    debug: { entrySourceReason: "position-only VM (decision outside window)" },
   };
 }

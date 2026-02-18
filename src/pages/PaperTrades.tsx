@@ -3,7 +3,7 @@ import HelpTooltip from "@/components/HelpTooltip";
 import { usePaperStats } from "@/hooks/use-paper-engine";
 import { useCohort } from "@/hooks/use-cohort";
 import { applyLegacyGate } from "@/lib/cohortFilter";
-import { buildTradeVM } from "@/lib/build-trade-vm";
+import { buildTradeVM, buildTradeVMFromPosition } from "@/lib/build-trade-vm";
 import type { TradeVM } from "@/types/trade-vm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -94,6 +94,16 @@ export default function PaperTrades() {
     return map;
   }, [trades]);
 
+  // Index decisions by id for position→decision lookup
+  const decisionsById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const d of decisions as any[]) {
+      map.set(d.id, d);
+    }
+    return map;
+  }, [decisions]);
+
+  // Decision-centric VMs (for Decisions tab)
   const allVMs: TradeVM[] = useMemo(() => {
     return decisions.map((d: any) => {
       const pos = positionsByDecisionId.get(d.id) ?? null;
@@ -101,15 +111,23 @@ export default function PaperTrades() {
     });
   }, [decisions, positionsByDecisionId]);
 
-  // Categorize VMs by status
+  // Position-centric VMs (for Open/Closed/Pending tabs — positions are source of truth)
+  const positionVMs: TradeVM[] = useMemo(() => {
+    return (trades as any[]).map((pos: any) => {
+      const dec = pos.decision_id ? decisionsById.get(pos.decision_id) ?? null : null;
+      return buildTradeVMFromPosition(pos, dec);
+    });
+  }, [trades, decisionsById]);
+
+  // Categorize using position-centric VMs (never misses positions outside decision window)
   const proposedVMs = useMemo(() => allVMs.filter(vm => vm.status === "PROPOSED"), [allVMs]);
-  const pendingVMs = useMemo(() => allVMs.filter(vm => vm.status === "PENDING_ENTRY"), [allVMs]);
-  const openVMs = useMemo(() => allVMs.filter(vm => vm.status === "OPEN"), [allVMs]);
-  const closedVMs = useMemo(() => allVMs.filter(vm => vm.status === "CLOSED"), [allVMs]);
+  const pendingVMs = useMemo(() => positionVMs.filter(vm => vm.status === "PENDING_ENTRY"), [positionVMs]);
+  const openVMs = useMemo(() => positionVMs.filter(vm => vm.status === "OPEN"), [positionVMs]);
+  const closedVMs = useMemo(() => positionVMs.filter(vm => vm.status === "CLOSED"), [positionVMs]);
   const activeVMs = useMemo(() => [...openVMs, ...pendingVMs], [openVMs, pendingVMs]);
 
   // Selected VM
-  const selectedVM = useMemo(() => allVMs.find(vm => vm.id === selectedVmId) ?? null, [allVMs, selectedVmId]);
+  const selectedVM = useMemo(() => allVMs.find(vm => vm.id === selectedVmId) ?? positionVMs.find(vm => vm.id === selectedVmId) ?? null, [allVMs, positionVMs, selectedVmId]);
 
   // ─── METRICS (derived from already-gated arrays) ──────────────
   const metricsDecisions = decisions;
