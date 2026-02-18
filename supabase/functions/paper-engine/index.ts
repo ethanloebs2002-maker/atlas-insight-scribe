@@ -302,17 +302,13 @@ async function emitDecision(
       return sProb > accProb ? s : acc;
     }, scenarios[0]);
 
-    // ── Sanity assert: detect if comparator ever disagrees with index-0 ──
-    const bull = scenarios.find((s: any) => s.type === "bullish");
-    const bear = scenarios.find((s: any) => s.type === "bearish");
-    if (bull && bear) {
-      const bullProb = Number(bull.probability ?? 0);
-      const bearProb = Number(bear.probability ?? 0);
-      if (bearProb > bullProb && best?.type !== "bearish") {
-        console.warn("[SCENARIOS][BUG] bearProb > bullProb but winner != bearish", {
-          bullProb, bearProb, winner: best?.type,
-        });
-      }
+    // ── Sanity checks: catch NaN probs, bad types, null best ──
+    const probs = scenarios.map((s: any) => ({ type: s.type, prob: Number(s?.probability) }));
+    if (probs.some(p => Number.isNaN(p.prob))) {
+      console.warn("[SCENARIOS][BAD_PROB]", { symbol: assetId, probs });
+    }
+    if (!["bullish", "bearish", "neutral"].includes(best?.type)) {
+      console.warn("[SCENARIOS][BAD_TYPE]", { symbol: assetId, winner: best?.type, probs });
     }
 
     console.log("[SCENARIOS] emitDecision winner", {
