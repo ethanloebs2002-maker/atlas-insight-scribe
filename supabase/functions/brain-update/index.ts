@@ -82,6 +82,29 @@ async function writeCursorCAS(sb: SB, expectedOld: string, newTs: string): Promi
   return !!data; // true if we won the race
 }
 
+async function acquireLease(sb: SB, owner: string, leaseSeconds = 90): Promise<boolean> {
+  const now = new Date().toISOString();
+  const until = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+  const { data, error } = await sb
+    .from("atlas_brain_cursor")
+    .update({ locked_until: until, lock_owner: owner })
+    .eq("id", 1)
+    .or(`locked_until.is.null,locked_until.lt.${now}`)
+    .select("lock_owner")
+    .maybeSingle();
+  if (error) throw new Error(`[brain] lease acquire failed: ${error.message}`);
+  return data?.lock_owner === owner;
+}
+
+async function releaseLease(sb: SB, owner: string): Promise<void> {
+  const { error } = await sb
+    .from("atlas_brain_cursor")
+    .update({ locked_until: null, lock_owner: null })
+    .eq("id", 1)
+    .eq("lock_owner", owner);
+  if (error) throw new Error(`[brain] lease release failed: ${error.message}`);
+}
+
 function bumpMaxHandled(current: string | null, ts?: string | null): string | null {
   if (!ts) return current;
   const ms = Date.parse(ts);
@@ -175,13 +198,33 @@ serve(async (req) => {
   const body = await req.json().catch(() => ({}));
   const positionId: string | null = body?.position_id ?? null;
   const brainTrace = newBrainTraceId();
+  const isBatch = !positionId;
 
+  // ── Lease lock: prevent concurrent batch runs from double-learning ────
+  if (isBatch) {
+    const gotLock = await acquireLease(sb, brainTrace, 90);
+    if (!gotLock) {
+      return new Response(JSON.stringify({
+        ok: true, updated: 0, msg: "lease busy; retry next cron",
+      }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+  }
+
+  try {
+    return await runBrainUpdate(sb, body, positionId, brainTrace, isBatch);
+  } finally {
+    if (isBatch) await releaseLease(sb, brainTrace);
+  }
+});
+
+async function runBrainUpdate(
+  sb: SB, body: any, positionId: string | null, brainTrace: string, isBatch: boolean,
+): Promise<Response> {
   // ── Step 1: Read from Memory (the Brain's ONLY input) ─────────────────
   let closedEvents: any[] = [];
   let cursorTs: string | null = null;
 
   if (positionId) {
-    // Single-position mode: seed by phase only, don't require source=execution
     const { data } = await sb
       .from("atlas_memory_events")
       .select("id,ts,trace_id,position_id,decision_id,cohort_id,symbol,timeframe,phase,source,payload")
@@ -191,9 +234,7 @@ serve(async (req) => {
       .limit(1);
     closedEvents = data ?? [];
   } else {
-    // Batch mode: cursor-based idempotent read (never re-learn same EXIT_CLOSED)
     cursorTs = await readCursor(sb);
-
     const { data, error } = await sb
       .from("atlas_memory_events")
       .select("id,ts,trace_id,position_id,decision_id,cohort_id,symbol,timeframe,phase,source,payload")
@@ -201,7 +242,6 @@ serve(async (req) => {
       .gt("ts", cursorTs)
       .order("ts", { ascending: true })
       .limit(body?.limit ?? 50);
-
     if (error) throw new Error(`[brain] EXIT_CLOSED load failed: ${error.message}`);
     closedEvents = data ?? [];
   }
@@ -247,12 +287,10 @@ serve(async (req) => {
     const exitEv = getExitClosedEvent(mb);
     if (!exitEv) {
       console.log("[brain] skip: no EXIT_CLOSED in bundle", { positionId: pid });
-      // Do NOT bump cursor — this is potentially fixable
       continue;
     }
 
     if (!cohortAllows(exitEv)) {
-      // Terminal discard: legacy cohort will NEVER be learned → safe to advance cursor past
       console.log("[brain] skip: cohort blocked", { positionId: pid, cohort_id: exitEv.cohort_id });
       maxHandledTs = bumpMaxHandled(maxHandledTs, exitEv.ts ?? exitEv.created_at);
       skippedCohort++;
@@ -260,7 +298,6 @@ serve(async (req) => {
     }
 
     if (!epochAllows(exitEv)) {
-      // Terminal discard: before epoch will NEVER be learned → safe to advance cursor past
       console.log("[brain] skip: before epoch", { positionId: pid, ts: exitEv.ts ?? exitEv.created_at });
       maxHandledTs = bumpMaxHandled(maxHandledTs, exitEv.ts ?? exitEv.created_at);
       skippedEpoch++;
@@ -271,21 +308,17 @@ serve(async (req) => {
     const consensus = bundle["DECISION_EMIT:consensus"];
     if (!consensus) {
       console.log("[brain] skip: missing DECISION_EMIT:consensus (bundle contract violated)", {
-        positionId: pid,
-        decisionId: mb.decisionId,
-        keysPresent: Object.keys(bundle),
+        positionId: pid, decisionId: mb.decisionId, keysPresent: Object.keys(bundle),
       });
       skippedNoConsensus++;
+      // Do NOT bump cursor — this is potentially fixable
       continue;
     }
 
     // ── Boundary proof log ────────────────────────────────────────────
     console.log("[brain] learn: bundle ok", {
-      positionId: pid,
-      decisionId: mb.decisionId,
-      traceId: mb.traceId,
-      cohort_id: exitEv.cohort_id ?? null,
-      hasConsensus: true,
+      positionId: pid, decisionId: mb.decisionId, traceId: mb.traceId,
+      cohort_id: exitEv.cohort_id ?? null, hasConsensus: true,
       phases: [...new Set(mb.events.map(e => e.phase))].sort(),
     });
 
@@ -313,10 +346,7 @@ serve(async (req) => {
       const { data: cur } = await sb
         .from("scenario_reputation")
         .select("alpha,beta,samples,wins,losses,expires,ema_winrate")
-        .eq("scenario_key", key)
-        .eq("symbol", sym)
-        .eq("timeframe", tf)
-        .eq("regime", rg)
+        .eq("scenario_key", key).eq("symbol", sym).eq("timeframe", tf).eq("regime", rg)
         .maybeSingle();
 
       const alpha0 = Number(cur?.alpha ?? 1);
@@ -340,29 +370,21 @@ serve(async (req) => {
       const posterior = {
         alpha: alpha1, beta: beta1, posterior_mean: mean,
         credibility: cred, samples: samples1,
-        wins: wins0 + (isWin ? 1 : 0),
-        losses: losses0 + (isLoss ? 1 : 0),
-        expires: expires0 + (isExpired ? 1 : 0),
-        ema_winrate: ema1,
+        wins: wins0 + (isWin ? 1 : 0), losses: losses0 + (isLoss ? 1 : 0),
+        expires: expires0 + (isExpired ? 1 : 0), ema_winrate: ema1,
       };
 
       await sb.from("scenario_reputation").upsert({
         scenario_key: key, symbol: sym, timeframe: tf, regime: rg,
-        cohort_id: COHORT_BRAIN,
-        ...posterior,
-        updated_at: new Date().toISOString(),
+        cohort_id: COHORT_BRAIN, ...posterior, updated_at: new Date().toISOString(),
       }, { onConflict: "scenario_key,symbol,timeframe,regime" });
 
       brainLogs.push({
-        trace_id: brainTrace,
-        target_table: "scenario_reputation",
-        target_key: `${key}|${sym}|${tf}|${rg}`,
-        symbol: sym,
-        cohort_id: COHORT_BRAIN,
+        trace_id: brainTrace, target_table: "scenario_reputation",
+        target_key: `${key}|${sym}|${tf}|${rg}`, symbol: sym, cohort_id: COHORT_BRAIN,
         update_type: "BAYESIAN_UPDATE",
         prior_state: { alpha: alpha0, beta: beta0, samples: samples0, ema_winrate: ema0 },
-        posterior_state: posterior,
-        memory_event_ids: allIds,
+        posterior_state: posterior, memory_event_ids: allIds,
         source_function: "brain-update",
         notes: `outcome=${outcome} pnl=${realizedPnl} scenarios=${scenarioKeys.length} trace=${brainTrace}`,
       });
@@ -374,9 +396,7 @@ serve(async (req) => {
     const bpId = decBpId ?? exitBpId ?? null;
     if (bpId) {
       const { data: cur } = await sb.from("strategy_reputation")
-        .select("*")
-        .eq("blueprint_id", bpId)
-        .maybeSingle();
+        .select("*").eq("blueprint_id", bpId).maybeSingle();
 
       const prevRep = Number(cur?.reputation ?? 0);
       const prevConf = Number(cur?.confidence ?? 0.2);
@@ -390,29 +410,20 @@ serve(async (req) => {
       const rawRep = winRate * 0.4 + expectancyScore * 0.4 + (1 - ddPenalty) * 0.2;
       const newRep = prevRep * 0.7 + rawRep * 0.3;
 
-      const posterior = {
-        reputation: clamp(newRep, 0, 1),
-        confidence: newConf,
-      };
+      const posterior = { reputation: clamp(newRep, 0, 1), confidence: newConf };
 
       await sb.from("strategy_reputation").upsert({
-        blueprint_id: bpId,
-        cohort_id: COHORT_BRAIN,
-        ...posterior,
+        blueprint_id: bpId, cohort_id: COHORT_BRAIN, ...posterior,
         last_updated: new Date().toISOString(),
         notes: JSON.stringify({ outcome, pnl: realizedPnl, r: realizedR }),
       }, { onConflict: "blueprint_id" });
 
       brainLogs.push({
-        trace_id: brainTrace,
-        target_table: "strategy_reputation",
-        target_key: bpId,
-        symbol,
-        cohort_id: COHORT_BRAIN,
+        trace_id: brainTrace, target_table: "strategy_reputation",
+        target_key: bpId, symbol, cohort_id: COHORT_BRAIN,
         update_type: "REPUTATION_BLEND",
         prior_state: { reputation: prevRep, confidence: prevConf },
-        posterior_state: posterior,
-        memory_event_ids: allIds,
+        posterior_state: posterior, memory_event_ids: allIds,
         source_function: "brain-update",
         notes: `outcome=${outcome} r=${realizedR} trace=${brainTrace}`,
       });
@@ -429,34 +440,25 @@ serve(async (req) => {
     await brainLog(brainLogs, sb);
   }
 
-  // ── Step 5: Advance cursor via CAS (batch mode only) ────────────────
+  // ── Step 5: Advance cursor via CAS (batch mode only, while holding lease)
   let cursorAdvanced = false;
-  if (!positionId && maxHandledTs && cursorTs) {
+  if (isBatch && maxHandledTs && cursorTs) {
     const ok = await writeCursorCAS(sb, cursorTs, maxHandledTs);
     if (!ok) {
-      console.log("[brain] cursor CAS lost race; aborting to prevent double-learn", {
+      console.log("[brain] cursor CAS lost race (unexpected under lease)", {
         expected: cursorTs, attempted: maxHandledTs,
       });
-      return new Response(JSON.stringify({
-        ok: true, updated: 0,
-        msg: "lost cursor race; retry next cron",
-        cursor: cursorTs,
-      }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+      // Lease protects us, so this shouldn't happen. Log but still return results.
+    } else {
+      cursorAdvanced = true;
+      console.log("[brain] cursor advanced", { oldCursor: cursorTs, newCursor: maxHandledTs });
     }
-    cursorAdvanced = true;
-    console.log("[brain] cursor advanced", { oldCursor: cursorTs, newCursor: maxHandledTs });
   }
 
   return new Response(JSON.stringify({
-    ok: true,
-    scenario_updates: scenarioUpdates,
-    strategy_updates: strategyUpdates,
-    memory_events_processed: closedEvents.length,
-    positions_loaded: bundleMap.size,
-    brain_trace: brainTrace,
-    cursor_advanced: cursorAdvanced,
+    ok: true, scenario_updates: scenarioUpdates, strategy_updates: strategyUpdates,
+    memory_events_processed: closedEvents.length, positions_loaded: bundleMap.size,
+    brain_trace: brainTrace, cursor_advanced: cursorAdvanced,
     skipped: { cohort: skippedCohort, epoch: skippedEpoch, no_consensus: skippedNoConsensus },
-  }), {
-    headers: { ...corsHeaders, "content-type": "application/json" },
-  });
-});
+  }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+}
