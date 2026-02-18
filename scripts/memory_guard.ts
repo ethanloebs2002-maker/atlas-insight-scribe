@@ -195,17 +195,34 @@ if (tickFile) {
   }
 
   // Deterministic guard: find all .from("paper_positions").update({ ... status: "CLOSED" ... })
-  // Allow the one inside closePosition; flag any others.
+  // Allow only those that occur inside closePosition(); flag any others.
   const cpStart = content.indexOf("closePosition(");
-  const cpEnd = cpStart >= 0 ? content.indexOf("}", cpStart) : -1;
-  const closeSlice = (cpStart >= 0 && cpEnd > cpStart) ? content.slice(cpStart, cpEnd + 1) : "";
+  let closeSlice = "";
 
-  const closedUpdatePattern = /\.from\(\s*['"`]paper_positions['"`]\s*\)\s*\.update\(\s*\{[^}]*status\s*:\s*['"`]CLOSED['"`]/gs;
+  if (cpStart >= 0) {
+    const braceStart = content.indexOf("{", cpStart);
+    if (braceStart >= 0) {
+      let depth = 0;
+      for (let i = braceStart; i < content.length; i++) {
+        const ch = content[i];
+        if (ch === "{") depth++;
+        else if (ch === "}") {
+          depth--;
+          if (depth === 0) {
+            closeSlice = content.slice(cpStart, i + 1);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  const closedUpdatePattern =
+    /\.from\(\s*['"`]paper_positions['"`]\s*\)\s*\.update\(\s*\{[^}]*status\s*:\s*['"`]CLOSED['"`]/gs;
   const matches = [...content.matchAll(closedUpdatePattern)];
 
   for (const m of matches) {
     const snippet = m[0].slice(0, 140).replace(/\s+/g, " ");
-    // If this exact snippet occurs inside closePosition slice, allow it
     if (closeSlice && closeSlice.includes(m[0])) continue;
 
     violations.push({
