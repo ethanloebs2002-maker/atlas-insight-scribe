@@ -106,16 +106,14 @@ export default function PaperTrades() {
 
   // ─── COHORT-AWARE METRICS (robust: uses positions/decisions arrays directly) ──
   const metricsDecisions = useMemo(() => {
-    if (cohort.mode === "all") return decisions;
-    if (cohort.cohortId === COHORTS.brain && cohort.includeLegacy) return decisions;
-    return filterByCohort(decisions, cohort.cohortId);
-  }, [decisions, cohort.mode, cohort.cohortId, cohort.includeLegacy]);
+    if (cohort.legacyUnlocked && cohort.includeLegacy) return decisions;
+    return decisions.filter((d: any) => d.cohort_id === COHORTS.brain);
+  }, [decisions, cohort.includeLegacy, cohort.legacyUnlocked]);
 
   const metricsTrades = useMemo(() => {
-    if (cohort.mode === "all") return trades;
-    if (cohort.cohortId === COHORTS.brain && cohort.includeLegacy) return trades;
-    return filterByCohort(trades, cohort.cohortId);
-  }, [trades, cohort.mode, cohort.cohortId, cohort.includeLegacy]);
+    if (cohort.legacyUnlocked && cohort.includeLegacy) return trades;
+    return trades.filter((t: any) => t.cohort_id === COHORTS.brain);
+  }, [trades, cohort.includeLegacy, cohort.legacyUnlocked]);
 
   // Position-based metrics (avoids fragile VM→position map joins)
   const metricsClosedPositions = useMemo(

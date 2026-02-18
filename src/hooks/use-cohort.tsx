@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from "react";
+import { isLegacyUnlocked } from "@/lib/legacyGate";
 
 export type CohortMode = "single" | "all";
 
@@ -9,6 +10,7 @@ export interface CohortState {
   setMode: (m: CohortMode) => void;
   includeLegacy: boolean;
   setIncludeLegacy: (v: boolean) => void;
+  legacyUnlocked: boolean;
   label: string;
 }
 
@@ -31,6 +33,8 @@ function resolveLabel(cohortId: string | null): string {
 }
 
 export function CohortProvider({ children }: { children: ReactNode }) {
+  const legacyUnlocked = isLegacyUnlocked();
+
   const [cohortId, setCohortIdRaw] = useState<string | null>(() => {
     try {
       const stored = localStorage.getItem(LS_KEY);
@@ -92,13 +96,21 @@ export function CohortProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cohortId]);
 
+  // GATE: force includeLegacy OFF when legacy is locked
+  useEffect(() => {
+    if (!legacyUnlocked && includeLegacy) {
+      setIncludeLegacyRaw(false);
+      try { localStorage.setItem(LS_LEGACY_KEY, "false"); } catch {}
+    }
+  }, [legacyUnlocked, includeLegacy]);
+
   const label = useMemo(() => {
-    if (includeLegacy && cohortId === COHORTS.brain) return "Brain + Legacy";
+    if (includeLegacy && legacyUnlocked && cohortId === COHORTS.brain) return "Brain + Legacy";
     return resolveLabel(cohortId);
-  }, [cohortId, includeLegacy]);
+  }, [cohortId, includeLegacy, legacyUnlocked]);
 
   return (
-    <CohortContext.Provider value={{ cohortId, setCohortId, mode, setMode, includeLegacy, setIncludeLegacy, label }}>
+    <CohortContext.Provider value={{ cohortId, setCohortId, mode, setMode, includeLegacy, setIncludeLegacy, legacyUnlocked, label }}>
       {children}
     </CohortContext.Provider>
   );

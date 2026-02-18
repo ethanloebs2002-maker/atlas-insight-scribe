@@ -9,6 +9,7 @@ import SystemStatusBanner from '@/components/SystemStatusBanner';
 import PortfolioBar from '@/components/PortfolioBar';
 import CohortSelector from '@/components/CohortSelector';
 import { useAuth } from '@/hooks/use-auth';
+import { isLegacyUnlocked } from '@/lib/legacyGate';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -22,35 +23,43 @@ type NavGroup = {
   items: { to: string; label: string; icon: typeof Activity }[];
 };
 
-const navGroups: NavGroup[] = [
-  {
-    label: 'Backbone',
-    pillar: 'backbone',
-    items: [
-      { to: '/', label: 'Search', icon: Search },
-      { to: '/dashboard', label: 'Market Health', icon: BarChart3 },
-      { to: '/whale-watch', label: 'Whale Watch', icon: Anchor },
-      { to: '/news', label: 'News Intel', icon: Newspaper },
-      { to: '/gpr', label: 'Global Patterns', icon: Globe },
-    ],
-  },
-  {
-    label: 'Memory',
-    pillar: 'memory',
-    items: [
-      { to: '/paper-trades', label: 'Trade Memory', icon: FlaskConical },
-      { to: '/archive', label: 'Archive', icon: Archive },
-    ],
-  },
-  {
-    label: 'Brain',
-    pillar: 'brain',
-    items: [
-      { to: '/meta', label: 'Meta-Cognition', icon: Brain },
-      { to: '/strategy-lab', label: 'Strategy Lab', icon: Dna },
-    ],
-  },
-];
+function buildNavGroups(): NavGroup[] {
+  const legacyVisible = isLegacyUnlocked();
+
+  const memoryItems: NavGroup['items'] = [
+    { to: '/paper-trades', label: 'Trade Memory', icon: FlaskConical },
+  ];
+  if (legacyVisible) {
+    memoryItems.push({ to: '/archive', label: 'Archive', icon: Archive });
+  }
+
+  return [
+    {
+      label: 'Backbone',
+      pillar: 'backbone',
+      items: [
+        { to: '/', label: 'Search', icon: Search },
+        { to: '/dashboard', label: 'Market Health', icon: BarChart3 },
+        { to: '/whale-watch', label: 'Whale Watch', icon: Anchor },
+        { to: '/news', label: 'News Intel', icon: Newspaper },
+        { to: '/gpr', label: 'Global Patterns', icon: Globe },
+      ],
+    },
+    {
+      label: 'Memory',
+      pillar: 'memory',
+      items: memoryItems,
+    },
+    {
+      label: 'Brain',
+      pillar: 'brain',
+      items: [
+        { to: '/meta', label: 'Meta-Cognition', icon: Brain },
+        { to: '/strategy-lab', label: 'Strategy Lab', icon: Dna },
+      ],
+    },
+  ];
+}
 
 const PILLAR_COLORS: Record<string, string> = {
   backbone: 'text-pillar-backbone',
@@ -68,6 +77,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { profile, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const navGroups = buildNavGroups();
 
   return (
     <div className="min-h-screen bg-background grid-bg scanline flex">

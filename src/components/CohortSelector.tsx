@@ -3,7 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 
 export default function CohortSelector() {
-  const { cohortId, setCohortId, mode, setMode, includeLegacy, setIncludeLegacy } = useCohort();
+  const { cohortId, setCohortId, mode, setMode, includeLegacy, setIncludeLegacy, legacyUnlocked } = useCohort();
 
   const selectorValue = mode === "all" ? "__all__" : (cohortId ?? COHORTS.brain);
   const isBrain = mode !== "all" && cohortId === COHORTS.brain;
@@ -26,12 +26,14 @@ export default function CohortSelector() {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={COHORTS.brain}>Brain Online</SelectItem>
-          <SelectItem value={COHORTS.legacy}>Legacy</SelectItem>
+          {legacyUnlocked && (
+            <SelectItem value={COHORTS.legacy}>Legacy</SelectItem>
+          )}
           <SelectItem value="__all__">All Cohorts</SelectItem>
         </SelectContent>
       </Select>
 
-      {isBrain && (
+      {legacyUnlocked && isBrain && (
         <div className="flex items-center gap-1">
           <span className="text-[9px] font-mono text-muted-foreground">+Legacy</span>
           <Switch
