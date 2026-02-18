@@ -275,6 +275,81 @@ export type Database = {
         }
         Relationships: []
       }
+      atlas_brain_log: {
+        Row: {
+          created_at: string
+          id: string
+          memory_event_ids: string[]
+          notes: string | null
+          posterior_state: Json
+          prior_state: Json
+          source_function: string
+          symbol: string | null
+          target_key: string
+          target_table: string
+          trace_id: string
+          ts: string
+          update_type: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          memory_event_ids?: string[]
+          notes?: string | null
+          posterior_state?: Json
+          prior_state?: Json
+          source_function: string
+          symbol?: string | null
+          target_key: string
+          target_table: string
+          trace_id: string
+          ts?: string
+          update_type: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          memory_event_ids?: string[]
+          notes?: string | null
+          posterior_state?: Json
+          prior_state?: Json
+          source_function?: string
+          symbol?: string | null
+          target_key?: string
+          target_table?: string
+          trace_id?: string
+          ts?: string
+          update_type?: string
+        }
+        Relationships: []
+      }
+      atlas_brain_sources: {
+        Row: {
+          created_at: string
+          description: string
+          is_active: boolean
+          owner_function: string
+          source: string
+          target_tables: string[]
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          is_active?: boolean
+          owner_function: string
+          source: string
+          target_tables?: string[]
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          is_active?: boolean
+          owner_function?: string
+          source?: string
+          target_tables?: string[]
+        }
+        Relationships: []
+      }
       atlas_memory_events: {
         Row: {
           created_at: string

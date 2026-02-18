@@ -16,7 +16,8 @@
     "writeLedgerEntry",
     "CANCEL_REASONS",
     "LEDGER_ENTRY_TYPES",
-    "memoryWrite"
+    "memoryWrite",
+    "brainLog"
   ],
   "canonicalFileHints": [
     "backbone",
@@ -24,7 +25,8 @@
     "ledger",
     "execution",
     "stateMachine",
-    "memory"
+    "memory",
+    "brain"
   ],
   "forbiddenInUiExecution": [
     "binance",
