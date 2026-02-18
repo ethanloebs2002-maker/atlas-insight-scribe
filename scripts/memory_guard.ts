@@ -180,46 +180,39 @@ for (const relPath of CHOKE_POINT_FILES) {
 }
 
 // Check 4b: paper-engine-tick must emit EXIT_CLOSED via closePosition (no bypass)
-const tickPath = allFiles.find(f => normalize(f).endsWith("supabase/functions/paper-engine-tick/index.ts"));
-if (tickPath) {
-  const content = fs.readFileSync(tickPath, "utf-8");
-  const lines = content.split("\n");
+const tickFile = allFiles.find(f => normalize(f).endsWith("supabase/functions/paper-engine-tick/index.ts"));
+if (tickFile) {
+  const content = fs.readFileSync(tickFile, "utf-8");
 
-  // Detect direct status='CLOSED' updates outside closePosition method
-  // Pattern: .update({ ... status: "CLOSED" ... }) NOT inside closePosition
+  // Must have closePosition method
   const closePositionMatch = content.match(/(?:private\s+)?async\s+closePosition\s*\(/);
   if (!closePositionMatch) {
     violations.push({
-      file: tickPath, line: 0,
+      file: tickFile, line: 0,
       content: "No closePosition() method found",
       reason: "paper-engine-tick must have a centralized closePosition() that emits EXIT_CLOSED Memory.",
     });
   }
 
-  // Check all close paths route through closePosition
-  const statusClosedPattern = /status:\s*["'`]CLOSED["'`]/g;
-  let match;
-  const closedWriteLines: number[] = [];
-  while ((match = statusClosedPattern.exec(content)) !== null) {
-    const lineNum = content.substring(0, match.index).split("\n").length;
-    closedWriteLines.push(lineNum);
-  }
+  // Deterministic guard: find all .from("paper_positions").update({ ... status: "CLOSED" ... })
+  // Allow the one inside closePosition; flag any others.
+  const cpStart = content.indexOf("closePosition(");
+  const cpEnd = cpStart >= 0 ? content.indexOf("}", cpStart) : -1;
+  const closeSlice = (cpStart >= 0 && cpEnd > cpStart) ? content.slice(cpStart, cpEnd + 1) : "";
 
-  // closePosition itself writes status: "CLOSED" — that's allowed.
-  // But any OTHER location writing status: "CLOSED" is a bypass.
-  // Simple heuristic: if there are more than 1 location, warn.
-  if (closedWriteLines.length > 1) {
-    // Find the closePosition method line range
-    const cpIdx = content.indexOf("closePosition(");
-    const cpLine = cpIdx >= 0 ? content.substring(0, cpIdx).split("\n").length : -1;
-    const outsideCp = closedWriteLines.filter(l => Math.abs(l - cpLine) > 60);
-    for (const badLine of outsideCp) {
-      violations.push({
-        file: tickPath, line: badLine,
-        content: lines[badLine - 1]?.trim().substring(0, 120) ?? "",
-        reason: `Direct status='CLOSED' write outside closePosition(). Route through closePosition() to ensure EXIT_CLOSED Memory fires.`,
-      });
-    }
+  const closedUpdatePattern = /\.from\(\s*['"`]paper_positions['"`]\s*\)\s*\.update\(\s*\{[^}]*status\s*:\s*['"`]CLOSED['"`]/gs;
+  const matches = [...content.matchAll(closedUpdatePattern)];
+
+  for (const m of matches) {
+    const snippet = m[0].slice(0, 140).replace(/\s+/g, " ");
+    // If this exact snippet occurs inside closePosition slice, allow it
+    if (closeSlice && closeSlice.includes(m[0])) continue;
+
+    violations.push({
+      file: tickFile, line: 0,
+      content: snippet,
+      reason: "Direct status='CLOSED' update found outside closePosition(). Route through closePosition() so EXIT_CLOSED Memory fan-out fires.",
+    });
   }
 }
 
