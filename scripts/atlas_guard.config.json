@@ -15,14 +15,16 @@
     "CanonicalMarketSnapshot",
     "writeLedgerEntry",
     "CANCEL_REASONS",
-    "LEDGER_ENTRY_TYPES"
+    "LEDGER_ENTRY_TYPES",
+    "memoryWrite"
   ],
   "canonicalFileHints": [
     "backbone",
     "market",
     "ledger",
     "execution",
-    "stateMachine"
+    "stateMachine",
+    "memory"
   ],
   "forbiddenInUiExecution": [
     "binance",

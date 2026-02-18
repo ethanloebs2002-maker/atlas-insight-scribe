@@ -7,6 +7,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { insertAttributionForPosition } from "../_shared/attribution_insert.ts";
 import { defaultMaxHoldMs } from "../_shared/closedloop.ts";
+import { memoryWrite, newTraceId } from "../_shared/memory.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -508,6 +509,44 @@ class PaperEngineCore {
         fetch(`${supabaseUrl}/functions/v1/derivatives-context-snap`, { method: "POST", headers, body: JSON.stringify(base) }),
         fetch(`${supabaseUrl}/functions/v1/execution-cost-snap`, { method: "POST", headers, body: JSON.stringify({ ...base, notional_usd: notionalUsd, side: pos.side }) }),
       ]).catch(e => console.warn("[ctx-snap-fill] failed:", e.message));
+
+      // ── Memory: ENTRY_FILLED ──
+      const traceId = newTraceId();
+      const memEvents = [
+        {
+          trace_id: traceId,
+          position_id: posId,
+          decision_id: pos.decision_id,
+          symbol: this.symbol,
+          timeframe: pos.timeframe,
+          phase: "ENTRY_FILLED" as const,
+          source: "execution" as const,
+          payload: {
+            entry_price: avgPrice,
+            qty,
+            side: pos.side,
+            fill_candle_ts: this.candle.ts,
+          },
+        },
+        {
+          trace_id: traceId,
+          position_id: posId,
+          decision_id: pos.decision_id,
+          symbol: this.symbol,
+          timeframe: pos.timeframe,
+          phase: "ENTRY_FILLED" as const,
+          source: "market" as const,
+          payload: {
+            bid: entryUpdate.entry_bid ?? null,
+            ask: entryUpdate.entry_ask ?? null,
+            mid: entryUpdate.entry_mid_price ?? null,
+            spread_bps: entryUpdate.spread_bps_at_entry ?? null,
+            imbalance: entryUpdate.imbalance_at_entry ?? null,
+            vol_regime: entryUpdate.vol_regime_at_entry ?? null,
+          },
+        },
+      ];
+      memoryWrite(memEvents, this.sb).catch(e => console.warn("[memory] ENTRY_FILLED failed:", e.message));
     }
 
     if (entryComplete) {
@@ -767,6 +806,29 @@ class PaperEngineCore {
         ? new Date(this.candle.ts).getTime() - new Date(pos.filled_at).getTime()
         : null,
     });
+
+    // ── Memory: EXIT_CLOSED ──
+    const durationMs = pos.filled_at
+      ? new Date(this.candle.ts).getTime() - new Date(pos.filled_at).getTime()
+      : null;
+    memoryWrite({
+      trace_id: newTraceId(),
+      position_id: posId,
+      decision_id: pos.decision_id ?? undefined,
+      symbol: pos.symbol,
+      timeframe: pos.timeframe,
+      phase: "EXIT_CLOSED",
+      source: "execution",
+      payload: {
+        exit_price: exitPrice,
+        close_reason: reason,
+        realized_pnl: pnl,
+        realized_r: realizedR,
+        outcome,
+        outcome_label: outcomeLabel,
+        duration_ms: durationMs,
+      },
+    }, this.sb).catch(e => console.warn("[memory] EXIT_CLOSED failed:", e.message));
 
     // ── Risk Lab: update performance on close ──
     if (pos.risk_profile_key) {

@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { insertWhaleContextSnapshot } from "../_shared/whale-context.ts";
 import { buildAttributionPayload } from "../_shared/attribution.ts";
 import { defaultEntryTtlMs, isoPlusMs } from "../_shared/closedloop.ts";
+import { memoryWrite, newTraceId } from "../_shared/memory.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -349,6 +350,28 @@ async function emitDecision(
       }).select().single();
 
       await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "TRADE_CANDIDATE", direction, probability, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
+
+      // ── Memory: DECISION_EMIT ──
+      if (decision.data?.id) {
+        memoryWrite({
+          trace_id: newTraceId(),
+          decision_id: decision.data.id,
+          symbol: assetId,
+          timeframe,
+          phase: "DECISION_EMIT",
+          source: "consensus",
+          payload: {
+            direction, probability, policyProbability,
+            consensus_score: context.consensusScore,
+            agreement_score: context.agreementScore,
+            completeness_score: context.completenessScore,
+            scenario_type: best.type,
+            consensus_authority: isFallback && consensusAuthority,
+            version_tag: VERSION_TAG,
+            horizon,
+          },
+        }, supabase).catch(e => console.warn("[memory] DECISION_EMIT failed:", e.message));
+      }
 
       // ── Hook A: Context snapshots on decision emission ──
       if (decision.data?.id) {
