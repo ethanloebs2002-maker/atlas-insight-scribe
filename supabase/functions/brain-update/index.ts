@@ -89,7 +89,7 @@ function cohortAllows(ev: MemoryEventRow): boolean {
 // ── Extractors ──────────────────────────────────────────────────────────
 
 /** Extract scenario keys from DECISION_EMIT consensus Memory event */
-function extractScenarioKeys(bundle: Record<string, any>): {
+function extractScenarioKeys(bundle: Record<string, MemoryEventRow>): {
   keys: string[];
   weights: Record<string, number>;
   direction: string | null;
@@ -100,7 +100,7 @@ function extractScenarioKeys(bundle: Record<string, any>): {
 } {
   const consensusEvent = bundle["DECISION_EMIT:consensus"];
   const payload = consensusEvent?.payload ?? {};
-  const data = payload.data ?? payload;
+  const data = (typeof payload === "object" && payload !== null && "data" in payload) ? (payload as any).data : payload;
 
   return {
     keys: Array.isArray(data.scenario_keys) ? data.scenario_keys : [],
@@ -114,7 +114,7 @@ function extractScenarioKeys(bundle: Record<string, any>): {
 }
 
 /** Extract outcome from EXIT_CLOSED execution Memory event */
-function extractOutcome(bundle: Record<string, any>): {
+function extractOutcome(bundle: Record<string, MemoryEventRow>): {
   outcome: string;
   realizedPnl: number;
   realizedR: number;
@@ -122,7 +122,7 @@ function extractOutcome(bundle: Record<string, any>): {
 } {
   const execEvent = bundle["EXIT_CLOSED:execution"];
   const payload = execEvent?.payload ?? {};
-  const data = payload.data ?? payload;
+  const data = (typeof payload === "object" && payload !== null && "data" in payload) ? (payload as any).data : payload;
 
   return {
     outcome: data.outcome ?? data.close_reason ?? "UNKNOWN",
@@ -146,12 +146,12 @@ serve(async (req) => {
   let closedEvents: any[] = [];
 
   if (positionId) {
+    // Single-position mode: seed by phase only, don't require source=execution
     const { data } = await sb
       .from("atlas_memory_events")
-      .select("id,trace_id,position_id,symbol,timeframe,phase,source,payload")
+      .select("id,trace_id,position_id,decision_id,symbol,timeframe,phase,source,payload")
       .eq("position_id", positionId)
       .eq("phase", "EXIT_CLOSED")
-      .eq("source", "execution")
       .order("ts", { ascending: false })
       .limit(1);
     closedEvents = data ?? [];
@@ -245,6 +245,11 @@ serve(async (req) => {
 
     // Extract scenario keys from DECISION_EMIT consensus event
     const { keys: scenarioKeys, regime, timeframe, strategyBlueprintId: decBpId } = extractScenarioKeys(bundle);
+
+    // ── Output boundary assertion ────────────────────────────────────
+    if (exitEv.cohort_id !== COHORT_BRAIN) {
+      throw new Error(`[brain] OUTPUT BOUNDARY VIOLATION: cohort=${exitEv.cohort_id} position=${pid}`);
+    }
 
     // ── Scenario Reputation Update (from Memory only) ────────────────
     for (const key of scenarioKeys) {
