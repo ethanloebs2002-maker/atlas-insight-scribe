@@ -66,19 +66,29 @@ export default function PaperTrades() {
   const { data: statsRes, isLoading } = usePaperStats(selectedAsset, true);
 
   const stats = statsRes?.data;
-  const decisions = stats?.decisions || [];
-  const trades = stats?.positions || stats?.trades || [];
+  const rawDecisions = stats?.decisions || [];
+  const rawTrades = stats?.positions || stats?.trades || [];
   const graduation = stats?.graduation || [];
   const confusionMatrix = stats?.confusionMatrix || { UP: { UP: 0, DOWN: 0, NEUTRAL: 0 }, DOWN: { UP: 0, DOWN: 0, NEUTRAL: 0 }, NEUTRAL: { UP: 0, DOWN: 0, NEUTRAL: 0 } };
   const bhHorizonStats = stats?.bhHorizonStats || {};
   const engineEvents = stats?.events || [];
   const config = stats?.config || { publicHorizons: ["6m", "1y", "3y", "5y"], learningHorizons: ["3m", "6m", "1y", "3y", "5y"], cadenceMap: {} };
 
+  // ─── GLOBAL GATE: filter ALL data through legacy + epoch gates ──
+  const decisions = useMemo(
+    () => applyLegacyGate(rawDecisions, cohort.includeLegacy),
+    [rawDecisions, cohort.includeLegacy],
+  );
+  const trades = useMemo(
+    () => applyLegacyGate(rawTrades, cohort.includeLegacy),
+    [rawTrades, cohort.includeLegacy],
+  );
+
   // ─── BUILD VIEW MODELS ────────────────────────────────────────
   // Index positions by decision_id for fast lookup
   const positionsByDecisionId = useMemo(() => {
     const map = new Map<string, any>();
-    for (const t of trades) {
+    for (const t of trades as any[]) {
       if (t.decision_id) map.set(t.decision_id, t);
     }
     return map;
@@ -101,16 +111,9 @@ export default function PaperTrades() {
   // Selected VM
   const selectedVM = useMemo(() => allVMs.find(vm => vm.id === selectedVmId) ?? null, [allVMs, selectedVmId]);
 
-  // ─── COHORT-AWARE METRICS (robust: uses positions/decisions arrays directly) ──
-  const metricsDecisions = useMemo(
-    () => applyLegacyGate(decisions, cohort.includeLegacy),
-    [decisions, cohort.includeLegacy],
-  );
-
-  const metricsTrades = useMemo(
-    () => applyLegacyGate(trades, cohort.includeLegacy),
-    [trades, cohort.includeLegacy],
-  );
+  // ─── METRICS (derived from already-gated arrays) ──────────────
+  const metricsDecisions = decisions;
+  const metricsTrades = trades;
 
   // Position-based metrics (avoids fragile VM→position map joins)
   const metricsClosedPositions = useMemo(
