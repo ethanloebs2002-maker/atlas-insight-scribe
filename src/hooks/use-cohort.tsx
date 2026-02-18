@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 
-export type CohortMode = "single" | "all" | "compare";
+export type CohortMode = "single" | "all";
 
 export interface CohortState {
   cohortId: string | null; // null = "All Cohorts"
@@ -8,6 +8,8 @@ export interface CohortState {
   mode: CohortMode;
   setMode: (m: CohortMode) => void;
   label: string;
+  includeLegacy: boolean;
+  setIncludeLegacy: (v: boolean) => void;
 }
 
 const COHORTS = {
@@ -19,6 +21,7 @@ export { COHORTS };
 
 const LS_KEY = "atlas_selected_cohort_id";
 const LS_MODE_KEY = "atlas_cohort_mode";
+const LS_LEGACY_KEY = "atlas_include_legacy_metrics";
 
 const CohortContext = createContext<CohortState | null>(null);
 
@@ -43,11 +46,18 @@ export function CohortProvider({ children }: { children: ReactNode }) {
   const [mode, setModeRaw] = useState<CohortMode>(() => {
     try {
       const stored = localStorage.getItem(LS_MODE_KEY);
-      if (stored === "compare") return "compare";
       if (stored === "all") return "all";
       return "single";
     } catch {
       return "single";
+    }
+  });
+
+  const [includeLegacy, setIncludeLegacyRaw] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(LS_LEGACY_KEY) === "true";
+    } catch {
+      return false;
     }
   });
 
@@ -59,9 +69,11 @@ export function CohortProvider({ children }: { children: ReactNode }) {
   const setMode = (m: CohortMode) => {
     setModeRaw(m);
     try { localStorage.setItem(LS_MODE_KEY, m); } catch {}
-    if (m === "compare") {
-      setCohortId(COHORTS.brain);
-    }
+  };
+
+  const setIncludeLegacy = (v: boolean) => {
+    setIncludeLegacyRaw(v);
+    try { localStorage.setItem(LS_LEGACY_KEY, String(v)); } catch {}
   };
 
   useEffect(() => {
@@ -69,10 +81,10 @@ export function CohortProvider({ children }: { children: ReactNode }) {
     else if (mode === "single" && !cohortId) setCohortIdRaw(COHORTS.brain);
   }, [mode]);
 
-  const label = mode === "compare" ? "Compare" : resolveLabel(cohortId);
+  const label = includeLegacy ? "Brain + Legacy" : resolveLabel(cohortId);
 
   return (
-    <CohortContext.Provider value={{ cohortId, setCohortId, mode, setMode, label }}>
+    <CohortContext.Provider value={{ cohortId, setCohortId, mode, setMode, label, includeLegacy, setIncludeLegacy }}>
       {children}
     </CohortContext.Provider>
   );
