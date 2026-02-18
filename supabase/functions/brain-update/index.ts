@@ -318,6 +318,20 @@ async function runBrainUpdate(
       continue;
     }
 
+    // ── Test-trade guard: never learn from forced/synthetic fills ────
+    {
+      const { data: posRow } = await sb
+        .from("paper_positions")
+        .select("meta")
+        .eq("id", pid)
+        .maybeSingle();
+      if (posRow?.meta?.is_test_trade) {
+        console.log("[brain] skip: test trade", { positionId: pid });
+        maxHandledTs = bumpMaxHandled(maxHandledTs, exitEv.ts ?? exitEv.created_at);
+        continue;
+      }
+    }
+
     // ── Contract assertion: DECISION_EMIT:consensus must be present ──
     const consensus = bundle["DECISION_EMIT:consensus"];
     if (!consensus) {
