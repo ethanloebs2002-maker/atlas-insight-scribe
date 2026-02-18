@@ -104,54 +104,53 @@ export default function PaperTrades() {
   // Selected VM
   const selectedVM = useMemo(() => allVMs.find(vm => vm.id === selectedVmId) ?? null, [allVMs, selectedVmId]);
 
-  // ─── COHORT-AWARE METRICS ─────────────────────────────────────
-  // Filter decisions/trades by cohort for metrics
+  // ─── COHORT-AWARE METRICS (robust: uses positions/decisions arrays directly) ──
   const metricsDecisions = useMemo(() => {
-    if (cohort.includeLegacy) return decisions; // brain + legacy = all
-    return filterByCohort(decisions, COHORTS.brain);
-  }, [decisions, cohort.includeLegacy]);
+    if (cohort.mode === "all") return decisions;
+    if (cohort.cohortId === COHORTS.brain && cohort.includeLegacy) return decisions;
+    return filterByCohort(decisions, cohort.cohortId);
+  }, [decisions, cohort.mode, cohort.cohortId, cohort.includeLegacy]);
 
   const metricsTrades = useMemo(() => {
-    if (cohort.includeLegacy) return trades;
-    return filterByCohort(trades, COHORTS.brain);
-  }, [trades, cohort.includeLegacy]);
+    if (cohort.mode === "all") return trades;
+    if (cohort.cohortId === COHORTS.brain && cohort.includeLegacy) return trades;
+    return filterByCohort(trades, cohort.cohortId);
+  }, [trades, cohort.mode, cohort.cohortId, cohort.includeLegacy]);
 
-  const metricsClosedVMs = useMemo(() => {
-    if (cohort.includeLegacy) return closedVMs;
-    return closedVMs.filter(vm => {
-      const pos = positionsByDecisionId.get(vm.decisionId ?? "");
-      return pos?.cohort_id === COHORTS.brain;
-    });
-  }, [closedVMs, cohort.includeLegacy, positionsByDecisionId]);
+  // Position-based metrics (avoids fragile VM→position map joins)
+  const metricsClosedPositions = useMemo(
+    () => metricsTrades.filter((p: any) => p.status === "CLOSED"),
+    [metricsTrades],
+  );
+  const metricsOpenPositions = useMemo(
+    () => metricsTrades.filter((p: any) => p.status === "OPEN"),
+    [metricsTrades],
+  );
+  const metricsPendingPositions = useMemo(
+    () => metricsTrades.filter((p: any) => p.status === "PENDING_ENTRY"),
+    [metricsTrades],
+  );
 
-  const metricsOpenVMs = useMemo(() => {
-    if (cohort.includeLegacy) return openVMs;
-    return openVMs.filter(vm => {
-      const pos = positionsByDecisionId.get(vm.decisionId ?? "");
-      return pos?.cohort_id === COHORTS.brain;
-    });
-  }, [openVMs, cohort.includeLegacy, positionsByDecisionId]);
+  const hasClosedTrades = metricsClosedPositions.length > 0;
+  const mClosedCount = metricsClosedPositions.length;
 
-  const metricsPendingVMs = useMemo(() => {
-    if (cohort.includeLegacy) return pendingVMs;
-    return pendingVMs.filter(vm => {
-      const pos = positionsByDecisionId.get(vm.decisionId ?? "");
-      return pos?.cohort_id === COHORTS.brain;
-    });
-  }, [pendingVMs, cohort.includeLegacy, positionsByDecisionId]);
-
-  // Stats derived from filtered VMs
+  // Directional accuracy (from decisions)
   const mEvaluatedDecisions = metricsDecisions.filter((d: any) => d.evaluated_at);
   const mCorrectDecisions = mEvaluatedDecisions.filter((d: any) => d.correct);
   const mDirAcc = mEvaluatedDecisions.length > 0 ? (mCorrectDecisions.length / mEvaluatedDecisions.length * 100) : 0;
-  const mClosedReturns = metricsClosedVMs.filter(vm => vm.performance?.realizedR != null).map(vm => vm.performance!.realizedR!);
-  const mAvgR = mClosedReturns.length > 0 ? mClosedReturns.reduce((a, b) => a + b, 0) / mClosedReturns.length : 0;
-  const mWins = metricsClosedVMs.filter(vm => vm.performance?.isWin === true).length;
-  const mClosedCount = metricsClosedVMs.length;
-  const hasClosedTrades = mClosedCount > 0;
-  const losses = metricsClosedVMs.filter(vm => vm.performance?.isWin === false).length;
-  const sortedR = [...mClosedReturns].sort((a, b) => a - b);
+
+  // Win rate & Avg R (from closed positions — always reliable, no VM join needed)
+  const mWins = metricsClosedPositions.filter((p: any) => p.outcome === "TP" || Number(p.realized_pnl ?? 0) > 0).length;
+  const losses = metricsClosedPositions.filter((p: any) => p.outcome === "SL" || Number(p.realized_pnl ?? 0) < 0).length;
+  const mWinRate = mClosedCount > 0 ? (mWins / mClosedCount) * 100 : 0;
+
+  const mRValues = metricsClosedPositions
+    .map((p: any) => Number(p.r_multiple ?? p.realized_r ?? 0))
+    .filter((v: number) => Number.isFinite(v));
+  const mAvgR = mRValues.length > 0 ? mRValues.reduce((a: number, b: number) => a + b, 0) / mRValues.length : 0;
+  const sortedR = [...mRValues].sort((a, b) => a - b);
   const medianR = sortedR.length > 0 ? sortedR[Math.floor(sortedR.length / 2)] : 0;
+
   const visibleHorizons = showLearning ? config.learningHorizons : config.publicHorizons;
 
   // Filter by search
@@ -259,7 +258,7 @@ export default function PaperTrades() {
             />
             <SummaryCard
               label="Open / Pending"
-              value={`${metricsOpenVMs.length} / ${metricsPendingVMs.length}`}
+              value={`${metricsOpenPositions.length} / ${metricsPendingPositions.length}`}
               icon={<Shield className="h-3 w-3" />}
               tooltipId="metric-open-pending"
               scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}

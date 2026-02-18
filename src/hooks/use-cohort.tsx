@@ -1,23 +1,21 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from "react";
 
 export type CohortMode = "single" | "all";
 
 export interface CohortState {
-  cohortId: string | null; // null = "All Cohorts"
+  cohortId: string | null;
   setCohortId: (id: string | null) => void;
   mode: CohortMode;
   setMode: (m: CohortMode) => void;
-  label: string;
   includeLegacy: boolean;
   setIncludeLegacy: (v: boolean) => void;
+  label: string;
 }
 
-const COHORTS = {
+export const COHORTS = {
   brain: "brain_online_2026_02_17",
   legacy: "legacy_prebrain",
 } as const;
-
-export { COHORTS };
 
 const LS_KEY = "atlas_selected_cohort_id";
 const LS_MODE_KEY = "atlas_cohort_mode";
@@ -36,7 +34,7 @@ export function CohortProvider({ children }: { children: ReactNode }) {
   const [cohortId, setCohortIdRaw] = useState<string | null>(() => {
     try {
       const stored = localStorage.getItem(LS_KEY);
-      if (stored === "null" || stored === null) return COHORTS.brain;
+      if (stored === null || stored === "null") return COHORTS.brain;
       return stored;
     } catch {
       return COHORTS.brain;
@@ -76,15 +74,31 @@ export function CohortProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(LS_LEGACY_KEY, String(v)); } catch {}
   };
 
+  // Mode enforcement
   useEffect(() => {
-    if (mode === "all") setCohortIdRaw(null);
-    else if (mode === "single" && !cohortId) setCohortIdRaw(COHORTS.brain);
+    if (mode === "all") {
+      setCohortIdRaw(null);
+    } else if (!cohortId) {
+      setCohortIdRaw(COHORTS.brain);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  const label = includeLegacy ? "Brain + Legacy" : resolveLabel(cohortId);
+  // Auto-disable includeLegacy when not on Brain cohort
+  useEffect(() => {
+    if (cohortId !== COHORTS.brain && includeLegacy) {
+      setIncludeLegacy(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cohortId]);
+
+  const label = useMemo(() => {
+    if (includeLegacy && cohortId === COHORTS.brain) return "Brain + Legacy";
+    return resolveLabel(cohortId);
+  }, [cohortId, includeLegacy]);
 
   return (
-    <CohortContext.Provider value={{ cohortId, setCohortId, mode, setMode, label, includeLegacy, setIncludeLegacy }}>
+    <CohortContext.Provider value={{ cohortId, setCohortId, mode, setMode, includeLegacy, setIncludeLegacy, label }}>
       {children}
     </CohortContext.Provider>
   );
