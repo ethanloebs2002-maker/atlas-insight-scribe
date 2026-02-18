@@ -120,22 +120,37 @@ serve(async (req) => {
   let bundleMap: Map<string, { bundle: Record<string, any>; allIds: string[]; events: any[] }>;
 
   if (positionId) {
-    // Single position mode — load just one bundle
-    const { data } = await sb
+    // Single position mode — load position events + DECISION_EMIT via decision_id
+    const { data: posData } = await sb
       .from("atlas_memory_events")
-      .select("id,trace_id,symbol,timeframe,phase,source,payload")
+      .select("id,trace_id,decision_id,symbol,timeframe,phase,source,payload")
       .eq("position_id", positionId)
-      .in("phase", ["DECISION_EMIT", "ENTRY_FILLED", "EXIT_CLOSED"])
+      .in("phase", ["ENTRY_FILLED", "EXIT_CLOSED"])
       .order("ts", { ascending: true });
 
-    const events = data ?? [];
+    const posEvents = posData ?? [];
+
+    // Get decision_id to fetch DECISION_EMIT (which has position_id=NULL)
+    const decId = posEvents.find(e => e.decision_id)?.decision_id;
+    let decEvents: any[] = [];
+    if (decId) {
+      const { data: dd } = await sb
+        .from("atlas_memory_events")
+        .select("id,trace_id,decision_id,symbol,timeframe,phase,source,payload")
+        .eq("decision_id", decId)
+        .eq("phase", "DECISION_EMIT")
+        .order("ts", { ascending: true });
+      decEvents = dd ?? [];
+    }
+
+    const allEvts = [...posEvents, ...decEvents];
     const bundle: Record<string, any> = {};
     const allIds: string[] = [];
-    for (const ev of events) {
+    for (const ev of allEvts) {
       bundle[`${ev.phase}:${ev.source}`] = ev;
       allIds.push(ev.id);
     }
-    bundleMap = new Map([[positionId, { bundle, allIds, events }]]);
+    bundleMap = new Map([[positionId, { bundle, allIds, events: allEvts }]]);
   } else {
     // Batch mode — single query for all positions
     bundleMap = await loadMemoryBundleBatch(positionIds, sb);

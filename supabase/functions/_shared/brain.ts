@@ -139,27 +139,68 @@ export async function loadMemoryBundleBatch(
 
   if (positionIds.length === 0) return result;
 
-  const { data, error } = await sb
+  // Step 1: Load ENTRY_FILLED + EXIT_CLOSED by position_id
+  const { data: posEvents, error: posErr } = await sb
     .from("atlas_memory_events")
-    .select("id,trace_id,position_id,symbol,timeframe,phase,source,payload")
+    .select("id,trace_id,position_id,decision_id,symbol,timeframe,phase,source,payload")
     .in("position_id", positionIds)
-    .in("phase", ["DECISION_EMIT", "ENTRY_FILLED", "EXIT_CLOSED"])
+    .in("phase", ["ENTRY_FILLED", "EXIT_CLOSED"])
     .order("ts", { ascending: true });
 
-  if (error) {
-    console.error("[brain] Batch memory load failed:", error.message);
+  if (posErr) {
+    console.error("[brain] Batch memory load (pos) failed:", posErr.message);
     return result;
   }
 
-  const events = data ?? [];
+  const allPosEvents = posEvents ?? [];
 
-  // Group by position_id
+  // Collect decision_ids so we can fetch DECISION_EMIT (which has position_id=NULL)
+  const decisionIds = [...new Set(
+    allPosEvents.map(e => e.decision_id).filter(Boolean),
+  )];
+
+  let decisionEvents: any[] = [];
+  if (decisionIds.length > 0) {
+    const { data: decData, error: decErr } = await sb
+      .from("atlas_memory_events")
+      .select("id,trace_id,position_id,decision_id,symbol,timeframe,phase,source,payload")
+      .in("decision_id", decisionIds)
+      .eq("phase", "DECISION_EMIT")
+      .order("ts", { ascending: true });
+
+    if (decErr) {
+      console.error("[brain] Batch memory load (dec) failed:", decErr.message);
+    } else {
+      decisionEvents = decData ?? [];
+    }
+  }
+
+  // Build decision_id → position_id(s) mapping
+  const decToPos = new Map<string, string[]>();
+  for (const ev of allPosEvents) {
+    if (!ev.decision_id || !ev.position_id) continue;
+    const arr = decToPos.get(ev.decision_id) ?? [];
+    if (!arr.includes(ev.position_id)) arr.push(ev.position_id);
+    decToPos.set(ev.decision_id, arr);
+  }
+
+  // Merge all events, grouping by position_id
   const grouped = new Map<string, any[]>();
-  for (const ev of events) {
+  for (const ev of allPosEvents) {
     if (!ev.position_id) continue;
     const arr = grouped.get(ev.position_id) ?? [];
     arr.push(ev);
     grouped.set(ev.position_id, arr);
+  }
+
+  // Attach DECISION_EMIT events to their position(s) via decision_id
+  for (const ev of decisionEvents) {
+    const pids = decToPos.get(ev.decision_id) ?? [];
+    for (const pid of pids) {
+      const arr = grouped.get(pid) ?? [];
+      arr.push(ev);
+      grouped.set(pid, arr);
+    }
   }
 
   // Build bundles
