@@ -499,18 +499,21 @@ export type Database = {
       atlas_settings: {
         Row: {
           eval_cadence_ms: number
+          eval_last_by_asset: Json | null
           id: string
           last_auto_eval_at: string | null
           updated_at: string
         }
         Insert: {
           eval_cadence_ms?: number
+          eval_last_by_asset?: Json | null
           id?: string
           last_auto_eval_at?: string | null
           updated_at?: string
         }
         Update: {
           eval_cadence_ms?: number
+          eval_last_by_asset?: Json | null
           id?: string
           last_auto_eval_at?: string | null
           updated_at?: string

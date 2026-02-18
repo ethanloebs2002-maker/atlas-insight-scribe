@@ -183,18 +183,42 @@ async function recordDecision(body: any) {
 }
 
 // ─── CADENCE GUARD ───────────────────────────────────────────────
-async function checkCadenceGuard(emittedBy: string): Promise<{ allowed: boolean; reason?: string }> {
-  // MANUAL and AUTO_EVAL bypass per-call cadence — auto-eval manages its own cadence via cron schedule
-  if (emittedBy === "MANUAL_EVALUATE" || emittedBy === "AUTO_EVAL") return { allowed: true };
-  const { data: settings } = await supabase.from("atlas_settings").select("*").eq("id", "global").maybeSingle();
+async function checkCadenceGuard(
+  emittedBy: string,
+  assetId: string
+): Promise<{ allowed: boolean; reason?: string }> {
+  // Manual always allowed
+  if (emittedBy === "MANUAL_EVALUATE") return { allowed: true };
+
+  const { data: settings } = await supabase
+    .from("atlas_settings")
+    .select("*")
+    .eq("id", "global")
+    .maybeSingle();
   if (!settings) return { allowed: true };
+
   const cadenceMs = settings.eval_cadence_ms || 3600000;
-  const lastAt = settings.last_auto_eval_at;
-  if (lastAt) {
-    const elapsed = Date.now() - new Date(lastAt).getTime();
-    if (elapsed < cadenceMs) return { allowed: false, reason: `Cadence guard: ${elapsed}ms < ${cadenceMs}ms` };
+
+  // Per-asset last eval tracking (prevents global blocking)
+  const lastByAsset = ((settings as any).eval_last_by_asset || {}) as Record<string, string>;
+  const lastAtIso = lastByAsset[assetId];
+
+  if (lastAtIso) {
+    const elapsed = Date.now() - new Date(lastAtIso).getTime();
+    if (elapsed < cadenceMs) {
+      return { allowed: false, reason: `Cadence guard(${assetId}): ${elapsed}ms < ${cadenceMs}ms` };
+    }
   }
-  await supabase.from("atlas_settings").update({ last_auto_eval_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", "global");
+
+  // Update ONLY this asset key
+  const nowIso = new Date().toISOString();
+  const next = { ...lastByAsset, [assetId]: nowIso };
+
+  await supabase
+    .from("atlas_settings")
+    .update({ eval_last_by_asset: next, updated_at: nowIso } as any)
+    .eq("id", "global");
+
   return { allowed: true };
 }
 
@@ -1246,7 +1270,7 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
 
 // ─── FULL EVALUATE PIPELINE ──────────────────────────────────────
 async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: string, emittedBy: string = "UNKNOWN") {
-  const guard = await checkCadenceGuard(emittedBy);
+  const guard = await checkCadenceGuard(emittedBy, asset_id);
   if (!guard.allowed) {
     return { run_id: null, status: "CADENCE_BLOCKED", decision_type: "SKIPPED", reason: guard.reason };
   }
