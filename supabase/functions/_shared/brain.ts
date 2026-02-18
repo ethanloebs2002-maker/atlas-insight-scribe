@@ -124,6 +124,59 @@ export async function readRecentClosedMemory(
   return data ?? [];
 }
 
+/**
+ * Batch load Memory bundles for multiple positions in a single query.
+ * Eliminates N+1 problem in brain-update batch mode.
+ *
+ * Returns a Map: position_id → { bundle, allIds, events }
+ * where bundle is keyed by "PHASE:source".
+ */
+export async function loadMemoryBundleBatch(
+  positionIds: string[],
+  sb: ReturnType<typeof createClient>,
+): Promise<Map<string, { bundle: Record<string, any>; allIds: string[]; events: any[] }>> {
+  const result = new Map<string, { bundle: Record<string, any>; allIds: string[]; events: any[] }>();
+
+  if (positionIds.length === 0) return result;
+
+  const { data, error } = await sb
+    .from("atlas_memory_events")
+    .select("id,trace_id,position_id,symbol,timeframe,phase,source,payload")
+    .in("position_id", positionIds)
+    .in("phase", ["DECISION_EMIT", "ENTRY_FILLED", "EXIT_CLOSED"])
+    .order("ts", { ascending: true });
+
+  if (error) {
+    console.error("[brain] Batch memory load failed:", error.message);
+    return result;
+  }
+
+  const events = data ?? [];
+
+  // Group by position_id
+  const grouped = new Map<string, any[]>();
+  for (const ev of events) {
+    if (!ev.position_id) continue;
+    const arr = grouped.get(ev.position_id) ?? [];
+    arr.push(ev);
+    grouped.set(ev.position_id, arr);
+  }
+
+  // Build bundles
+  for (const [pid, evs] of grouped) {
+    const bundle: Record<string, any> = {};
+    const allIds: string[] = [];
+    for (const ev of evs) {
+      const key = `${ev.phase}:${ev.source}`;
+      bundle[key] = ev;
+      allIds.push(ev.id);
+    }
+    result.set(pid, { bundle, allIds, events: evs });
+  }
+
+  return result;
+}
+
 export function newBrainTraceId(): string {
   return crypto.randomUUID();
 }
