@@ -657,7 +657,7 @@ async function emitDecision(
                 // Portfolio risk observability
                 portfolio_risk_usd: gateExposure?.portfolioRiskUsd ?? null,
                 new_trade_risk_usd: newTradeRiskUsd,
-                max_portfolio_risk_usd: portfolioRiskCapUsd,
+                max_portfolio_risk_usd: portfolioRiskCapUsd ?? (VIRTUAL_EQUITY_USD * MAX_PORTFOLIO_RISK_PCT),
                 // Trade sizing observability
                 risk_cap_usd: riskCapUsd,
                 risk_clamped_qty: riskClampedQty,
@@ -733,7 +733,7 @@ async function emitDecision(
 
           // Determine how many siblings we can create given exposure (use already-loaded gateExposure)
           const exposure = gateExposure ?? await getExposure();
-          const remainingOpen = (policy?.max_open || 10) - exposure.openNonLegacy;
+          const remainingOpen = MAX_OPEN_FAILSAFE - exposure.openNonLegacy;
           const remainingPending = (policy?.max_pending || 20) - exposure.pending;
           const slotsAvailable = Math.min(remainingOpen, remainingPending);
 
