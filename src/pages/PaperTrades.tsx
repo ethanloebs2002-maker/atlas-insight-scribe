@@ -1,8 +1,7 @@
 import { useState, useMemo } from "react";
 import HelpTooltip from "@/components/HelpTooltip";
 import { usePaperStats } from "@/hooks/use-paper-engine";
-import { useCohortMetrics } from "@/hooks/use-cohort-metrics";
-import { useCohort } from "@/hooks/use-cohort";
+import { useCohort, COHORTS } from "@/hooks/use-cohort";
 import { buildTradeVM } from "@/lib/build-trade-vm";
 import type { TradeVM } from "@/types/trade-vm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,6 +42,33 @@ import { type EvalCadence, CADENCE_OPTIONS } from "@/lib/eval-cadence";
 import { useAutoEvaluationScheduler } from "@/hooks/use-auto-eval-scheduler";
 import { useIsMobile } from "@/hooks/use-mobile";
 
+// ─── COHORT FILTER HELPER ──────────────────────────────────────
+function filterByCohort<T extends { cohort_id?: string | null }>(rows: T[], cohortId: string | null): T[] {
+  if (!cohortId) return rows;
+  return rows.filter(r => r.cohort_id === cohortId);
+}
+
+function deriveCohortMetrics(decisions: any[], positions: any[]) {
+  const closedPos = positions.filter((p: any) => p.status === "CLOSED");
+  const openPos = positions.filter((p: any) => p.status === "OPEN");
+  const pendingPos = positions.filter((p: any) => p.status === "PENDING_ENTRY");
+  const wins = closedPos.filter((p: any) => p.outcome === "TP" || Number(p.realized_pnl ?? 0) > 0).length;
+  const losses = closedPos.filter((p: any) => p.outcome === "SL" || Number(p.realized_pnl ?? 0) < 0).length;
+  const winRate = closedPos.length > 0 ? (wins / closedPos.length) * 100 : 0;
+  const rValues = closedPos.map((p: any) => Number(p.r_multiple ?? p.realized_r ?? 0)).filter((v: number) => Number.isFinite(v));
+  const avgR = rValues.length > 0 ? rValues.reduce((a: number, b: number) => a + b, 0) / rValues.length : 0;
+  const evaluated = decisions.filter((d: any) => d.evaluated_at);
+  const correct = evaluated.filter((d: any) => d.correct);
+  const dirAcc = evaluated.length > 0 ? (correct.length / evaluated.length) * 100 : 0;
+  return {
+    decisionsCount: decisions.length,
+    openCount: openPos.length,
+    closedCount: closedPos.length,
+    pendingCount: pendingPos.length,
+    wins, losses, winRate, dirAcc, avgR,
+  };
+}
+
 export default function PaperTrades() {
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [paused, setPaused] = useState(false);
@@ -54,8 +80,8 @@ export default function PaperTrades() {
   const isMobile = useIsMobile();
 
   const sched = useAutoEvaluationScheduler(runAutoEvalTick, !paused && !!selectedAsset);
-  const { primary: cohortMetrics, secondary: legacyMetrics, isCompare } = useCohortMetrics(selectedAsset);
   const cohort = useCohort();
+  const isCompare = cohort.mode === "compare";
   const { data: assetsRes } = useIncorporatedAssets();
   const incorporatedAssets = (assetsRes?.data || []) as { asset_id: string; symbol: string; is_enabled: boolean }[];
   const ASSETS = incorporatedAssets.length > 0
@@ -110,6 +136,21 @@ export default function PaperTrades() {
   const wins = closedVMs.filter(vm => vm.performance?.isWin === true).length;
   const losses = closedVMs.filter(vm => vm.performance?.isWin === false).length;
   const visibleHorizons = showLearning ? config.learningHorizons : config.publicHorizons;
+
+  // ─── COHORT COMPARE METRICS (from same in-memory arrays) ────
+  const cohortMetrics = useMemo(() => {
+    if (!isCompare) return null;
+    const brainDec = filterByCohort(decisions, COHORTS.brain);
+    const brainPos = filterByCohort(trades, COHORTS.brain);
+    return deriveCohortMetrics(brainDec, brainPos);
+  }, [isCompare, decisions, trades]);
+
+  const legacyMetrics = useMemo(() => {
+    if (!isCompare) return null;
+    const legDec = filterByCohort(decisions, COHORTS.legacy);
+    const legPos = filterByCohort(trades, COHORTS.legacy);
+    return deriveCohortMetrics(legDec, legPos);
+  }, [isCompare, decisions, trades]);
 
   // Filter by search
   const filterVMs = (vms: TradeVM[]) =>
@@ -182,11 +223,11 @@ export default function PaperTrades() {
               <span className="text-[8px] font-mono text-muted-foreground/50">Compare mode affects metrics only; lists show selected cohort.</span>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              <CompareCard label="Decisions" left={cohortMetrics.decisionsCount} right={legacyMetrics.decisionsCount} />
-              <CompareCard label="Directional Accuracy" left={`${cohortMetrics.dirAcc.toFixed(1)}%`} right={`${legacyMetrics.dirAcc.toFixed(1)}%`} />
-              <CompareCard label="Win Rate" left={`${cohortMetrics.winRate.toFixed(1)}%`} right={`${legacyMetrics.winRate.toFixed(1)}%`} />
-              <CompareCard label="Avg R" left={cohortMetrics.avgR.toFixed(3)} right={legacyMetrics.avgR.toFixed(3)} />
-              <CompareCard label="Open / Closed" left={`${cohortMetrics.openCount} / ${cohortMetrics.closedCount}`} right={`${legacyMetrics.openCount} / ${legacyMetrics.closedCount}`} />
+              <CompareCard label="Decisions" left={cohortMetrics?.decisionsCount ?? 0} right={legacyMetrics?.decisionsCount ?? 0} />
+              <CompareCard label="Directional Accuracy" left={`${(cohortMetrics?.dirAcc ?? 0).toFixed(1)}%`} right={`${(legacyMetrics?.dirAcc ?? 0).toFixed(1)}%`} />
+              <CompareCard label="Win Rate" left={`${(cohortMetrics?.winRate ?? 0).toFixed(1)}%`} right={`${(legacyMetrics?.winRate ?? 0).toFixed(1)}%`} />
+              <CompareCard label="Avg R" left={(cohortMetrics?.avgR ?? 0).toFixed(3)} right={(legacyMetrics?.avgR ?? 0).toFixed(3)} />
+              <CompareCard label="Open / Closed" left={`${cohortMetrics?.openCount ?? 0} / ${cohortMetrics?.closedCount ?? 0}`} right={`${legacyMetrics?.openCount ?? 0} / ${legacyMetrics?.closedCount ?? 0}`} />
             </div>
           </div>
         ) : (
