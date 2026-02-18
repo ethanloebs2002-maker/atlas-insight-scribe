@@ -2,7 +2,8 @@
  * ATLAS Memory Guard — Static analysis for Memory pillar integrity.
  *
  * Detects writes to atlas_memory_events from non-approved modules,
- * and detects new ad-hoc event tables that bypass Memory.
+ * detects new ad-hoc event tables that bypass Memory,
+ * and validates source participation contract.
  *
  * Usage: npx tsx scripts/memory_guard.ts
  *
@@ -12,7 +13,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
-// ── Approved writers to atlas_memory_events ──────────────────────────────
+// ── Approved writers to atlas_memory_events ──────────────────────────
 const MEMORY_TABLE = "atlas_memory_events";
 
 const MEMORY_WRITE_WHITELIST = [
@@ -21,35 +22,35 @@ const MEMORY_WRITE_WHITELIST = [
   "scripts/memory_guard.ts",
 ];
 
-// ── Approved writers for other sensitive tables ──────────────────────────
-// Maps table → list of allowed file path suffixes
+// ── Approved writers for other sensitive tables ──────────────────────
 const SENSITIVE_TABLE_WRITERS: Record<string, string[]> = {
-  // Backbone pillar
   latest_prices: ["supabase/functions/market-data-pump/", "supabase/functions/crypto-data/"],
   latest_orderbook: ["supabase/functions/market-data-pump/"],
-  // Snapshot tables: only their dedicated snapshotters
   market_context_snapshots: ["supabase/functions/market-context-snap/", "supabase/functions/_shared/market_context.ts"],
   derivatives_context_snapshots: ["supabase/functions/derivatives-context-snap/"],
   execution_cost_snapshots: ["supabase/functions/execution-cost-snap/"],
-  // Engine tables: only from engine functions
   paper_positions: ["supabase/functions/paper-engine/", "supabase/functions/paper-engine-tick/"],
   paper_decisions: ["supabase/functions/paper-engine/", "supabase/functions/paper-engine-tick/", "supabase/functions/auto-eval/"],
   paper_orders: ["supabase/functions/paper-engine/", "supabase/functions/paper-engine-tick/"],
   paper_fills: ["supabase/functions/paper-engine-tick/"],
 };
 
-// ── Disallowed: creating new ad-hoc event tables from UI code ────────────
-// Patterns that suggest someone is inserting into random tables from src/
+// ── Disallowed: creating new ad-hoc event tables from UI code ────────
 const UI_INSERT_PATTERN = /\.from\s*\(\s*['"`]([^'"`]+)['"`]\s*\)\s*\.\s*(?:insert|upsert)\s*\(/;
 
-// Tables that UI is allowed to insert into
 const UI_INSERT_WHITELIST = [
   "admin_messages",
   "profiles",
   "user_roles",
 ];
 
-// ── Helpers ──────────────────────────────────────────────────────────────
+// ── All 10 registered sources (must match atlas_memory_sources) ──────
+const REQUIRED_SOURCES = [
+  "consensus", "market", "orderbook", "derivatives",
+  "execution", "risk_lab", "policy", "whale", "news", "strategy",
+];
+
+// ── Helpers ──────────────────────────────────────────────────────────
 
 function getAllTsFiles(dir: string, files: string[] = []): string[] {
   if (!fs.existsSync(dir)) return files;
@@ -66,9 +67,7 @@ function getAllTsFiles(dir: string, files: string[] = []): string[] {
   return files;
 }
 
-function normalize(p: string) {
-  return p.replace(/\\/g, "/");
-}
+function normalize(p: string) { return p.replace(/\\/g, "/"); }
 
 function isWhitelisted(filePath: string, whitelist: string[]): boolean {
   const norm = normalize(filePath);
@@ -82,16 +81,16 @@ interface Violation {
   reason: string;
 }
 
-// ── Main scan ────────────────────────────────────────────────────────────
+// ── Main scan ────────────────────────────────────────────────────────
 
 const violations: Violation[] = [];
 
-// 1. Check for atlas_memory_events writes outside whitelist
 const allFiles: string[] = [];
 for (const dir of ["src", "supabase/functions", "scripts"]) {
   getAllTsFiles(dir, allFiles);
 }
 
+// Check 1: atlas_memory_events writes outside whitelist
 const memoryInsertPattern = new RegExp(`['"\`]${MEMORY_TABLE}['"\`]\\s*\\)\\s*\\.\\s*(?:insert|upsert|update)\\s*\\(`, "g");
 
 for (const file of allFiles) {
@@ -101,8 +100,7 @@ for (const file of allFiles) {
   for (let i = 0; i < lines.length; i++) {
     if (memoryInsertPattern.test(lines[i])) {
       violations.push({
-        file,
-        line: i + 1,
+        file, line: i + 1,
         content: lines[i].trim().substring(0, 120),
         reason: `Direct write to ${MEMORY_TABLE} outside approved Memory writer`,
       });
@@ -111,20 +109,18 @@ for (const file of allFiles) {
   }
 }
 
-// 2. Check sensitive table writes from wrong modules
+// Check 2: Sensitive table writes from wrong modules
 for (const [table, allowed] of Object.entries(SENSITIVE_TABLE_WRITERS)) {
   const tablePattern = new RegExp(`['"\`]${table}['"\`]\\s*\\)\\s*\\.\\s*(?:insert|upsert)\\s*\\(`, "g");
   for (const file of allFiles) {
     if (isWhitelisted(file, allowed)) continue;
-    // Also allow shared helpers used by the approved modules
     if (normalize(file).includes("_shared/")) continue;
     const content = fs.readFileSync(file, "utf-8");
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i++) {
       if (tablePattern.test(lines[i])) {
         violations.push({
-          file,
-          line: i + 1,
+          file, line: i + 1,
           content: lines[i].trim().substring(0, 120),
           reason: `Write to "${table}" from non-approved module. Allowed: ${allowed.join(", ")}`,
         });
@@ -134,7 +130,7 @@ for (const [table, allowed] of Object.entries(SENSITIVE_TABLE_WRITERS)) {
   }
 }
 
-// 3. Check UI code (src/) for inserts into non-whitelisted tables
+// Check 3: UI code inserts into non-whitelisted tables
 const srcFiles = getAllTsFiles("src");
 for (const file of srcFiles) {
   const content = fs.readFileSync(file, "utf-8");
@@ -145,17 +141,44 @@ for (const file of srcFiles) {
       const tableName = match[1];
       if (!UI_INSERT_WHITELIST.includes(tableName)) {
         violations.push({
-          file,
-          line: i + 1,
+          file, line: i + 1,
           content: lines[i].trim().substring(0, 120),
-          reason: `UI code inserts into "${tableName}". Route through Memory (atlas_memory_events) via memoryWrite() helper or an edge function.`,
+          reason: `UI code inserts into "${tableName}". Route through Memory or an edge function.`,
         });
       }
     }
   }
 }
 
-// ── Result ───────────────────────────────────────────────────────────────
+// Check 4: Validate fan-out completeness in choke-point code
+// Ensure memoryFanOut is used at all 3 choke points (not memoryWrite directly)
+const CHOKE_POINT_FILES = [
+  "supabase/functions/paper-engine/index.ts",
+  "supabase/functions/paper-engine-tick/index.ts",
+];
+
+for (const relPath of CHOKE_POINT_FILES) {
+  const fullPath = allFiles.find(f => normalize(f).endsWith(relPath));
+  if (!fullPath) continue;
+  const content = fs.readFileSync(fullPath, "utf-8");
+
+  // Check for direct memoryWrite calls (should use memoryFanOut instead)
+  const directWritePattern = /memoryWrite\s*\(/g;
+  const fanOutPattern = /memoryFanOut\s*\(/g;
+
+  const hasDirectWrite = directWritePattern.test(content);
+  const hasFanOut = fanOutPattern.test(content);
+
+  if (hasDirectWrite && !hasFanOut) {
+    violations.push({
+      file: relPath, line: 0,
+      content: "Uses memoryWrite() directly instead of memoryFanOut()",
+      reason: `Choke-point file must use memoryFanOut() for full source coverage. All ${REQUIRED_SOURCES.length} sources must report at each phase.`,
+    });
+  }
+}
+
+// ── Result ───────────────────────────────────────────────────────────
 
 if (violations.length > 0) {
   console.error("\n❌ THIS BREAKS THE MEMORY, PLEASE ADJUST\n");
@@ -169,5 +192,7 @@ if (violations.length > 0) {
   process.exit(1);
 } else {
   console.log("✅ Memory Guard passed — no violations found.");
+  console.log(`   ✓ Source participation contract: ${REQUIRED_SOURCES.length} sources required at each choke point`);
+  console.log(`   ✓ Fan-out enforcement: choke-point files use memoryFanOut()`);
   process.exit(0);
 }

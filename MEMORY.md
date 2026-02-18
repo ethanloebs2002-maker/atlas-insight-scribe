@@ -1,84 +1,104 @@
-# ATLAS Canonical Memory Pillar
+# ATLAS Canonical Memory Pillar — Unified Experiential Store
 
 ## Contract
 
 **No cross-layer experiential writes outside the Memory Bank.**
+**No silent gaps. Every source reports at every choke point.**
 
-All lifecycle events (decisions, fills, closes, learning updates) must be recorded in:
-- DB table: `atlas_memory_events`
-- Via the `memoryWrite()` helper in `supabase/functions/_shared/memory.ts`
-- Or via the `memory-write` edge function (HTTP endpoint)
+Memory is the unified experiential store for all channels. Every registered source
+must emit a fingerprint (data or explicit absence) at each lifecycle choke point.
 
-## Relationship to Market Data Backbone
+If a signal exists but is not represented in Memory, it does not exist to ATLAS.
+
+## The Three Statuses
+
+| Status | Meaning |
+|--------|---------|
+| **OK** | Source had real data, included in payload |
+| **MISSING** | Source had no data (disabled, unavailable, not applicable) |
+| **FAILED** | Source attempted but errored (geo-block, timeout, etc.) |
+
+Silence is forbidden. Absence is explicitly recorded.
+
+## Relationship to Other Pillars
 
 | Pillar | Purpose | Tables |
 |--------|---------|--------|
-| **Market Backbone** | Price/orderbook reads/writes | `latest_prices`, `latest_orderbook`, `market_data_config` |
+| **Backbone** | Price/orderbook reads/writes | `latest_prices`, `latest_orderbook`, `market_data_config` |
 | **Memory** | Experiential events: decision → context → execution → outcome | `atlas_memory_events`, `atlas_memory_sources` |
+| **Brain** | Learning & adaptation from Memory | `atlas_brain_log`, `atlas_brain_sources` |
 
-Both pillars have equal enforcement via guards.
+## Lifecycle Choke Points
 
-## Memory Events Schema
+| Phase | When | Sources Required |
+|-------|------|-----------------|
+| `DECISION_EMIT` | Consensus report / decision created | All 10 |
+| `ENTRY_FILLED` | Position filled / opened | All 10 |
+| `EXIT_CLOSED` | Position closed | All 10 |
+| `CADENCE_OBSERVE` | Periodic observation | As applicable |
+| `POLICY_UPDATE` | Policy or configuration change | As applicable |
+| `LEARNING_UPDATE` | Brain updates | As applicable |
 
-| Field | Description |
-|-------|-------------|
-| `trace_id` | Groups related events in the same lifecycle moment |
-| `position_id` | Links to paper_positions (nullable) |
-| `decision_id` | Links to paper_decisions (nullable) |
-| `symbol` | Asset symbol |
-| `phase` | Lifecycle phase (see below) |
-| `source` | Registered source (see below) |
-| `payload` | Compact JSONB summary (<10KB) |
+## Registered Sources (all 10)
 
-## Allowed Phases
+| Source | Owner Module | Description |
+|--------|-------------|-------------|
+| `market` | market-data-pump | Price data from backbone |
+| `orderbook` | market-data-pump | Bid/ask/spread/imbalance |
+| `derivatives` | derivatives-context-snap | Funding rate, OI |
+| `consensus` | paper-engine | Scenario probability + direction |
+| `execution` | paper-engine-tick | Fill/exit details |
+| `risk_lab` | paper-engine-tick | Risk profile + realized performance |
+| `policy` | paper-engine | Active policy parameters |
+| `whale` | whale-signal | Whale movement data |
+| `news` | news-engine | News sentiment data |
+| `strategy` | strategy-evolve | Strategy blueprint data |
 
-| Phase | When |
-|-------|------|
-| `DECISION_EMIT` | Consensus report / decision created |
-| `ENTRY_FILLED` | Position filled / opened |
-| `EXIT_CLOSED` | Position closed |
-| `CADENCE_OBSERVE` | Periodic observation (sensor summary) |
-| `POLICY_UPDATE` | Policy or configuration change |
-| `LEARNING_UPDATE` | Scenario reputation, risk lab, etc. |
+## Fan-Out Architecture
 
-## Registered Sources
+At each choke point, `memoryFanOut()` is called with known source events.
+Sources not explicitly provided receive an automatic MISSING event.
 
-Managed in `atlas_memory_sources` table. Current sources:
+```typescript
+import { memoryFanOut, type SourceEvent } from "../_shared/memory_fanout.ts";
 
-| Source | Owner Module |
-|--------|-------------|
-| `market` | market-data-pump |
-| `orderbook` | market-data-pump |
-| `derivatives` | derivatives-context-snap |
-| `consensus` | paper-engine |
-| `execution` | paper-engine-tick |
-| `risk_lab` | paper-engine-tick |
-| `policy` | paper-engine |
-| `whale` | whale-signal |
-| `news` | news-engine |
-| `strategy` | strategy-evolve |
+const sources: SourceEvent[] = [
+  { source: "execution", status: "OK", data: { entry_price: 100 } },
+  { source: "market", status: "OK", data: { mid: 100.5 } },
+  { source: "derivatives", status: "FAILED", reason: "451 geo-block" },
+  // ... remaining sources auto-fill as MISSING
+];
+
+await memoryFanOut(sb, "ENTRY_FILLED", traceId, common, sources);
+// Writes 10 events (one per source), all sharing the same trace_id
+```
+
+## Payload Structure
+
+Every Memory event payload now follows:
+
+```json
+{
+  "status": "OK | MISSING | FAILED",
+  "data": { ... },      // present when status=OK
+  "reason": "..."        // present when status=MISSING or FAILED
+}
+```
 
 ## How to Add a New Probe
 
-1. Register the source in `atlas_memory_sources`:
+1. Register in `atlas_memory_sources`:
    ```sql
-   INSERT INTO atlas_memory_sources (source, owner_module, description)
-   VALUES ('my_probe', 'supabase/functions/my-probe', 'Description');
+   INSERT INTO atlas_memory_sources (source, owner_module, description, required_at_phases)
+   VALUES ('my_probe', 'supabase/functions/my-probe', 'Description',
+           ARRAY['DECISION_EMIT','ENTRY_FILLED','EXIT_CLOSED']);
    ```
 
-2. Import and use `memoryWrite()` in your edge function:
-   ```typescript
-   import { memoryWrite, newTraceId } from "../_shared/memory.ts";
-   await memoryWrite({
-     trace_id: newTraceId(),
-     symbol: "BTC",
-     phase: "CADENCE_OBSERVE",
-     source: "my_probe",
-     payload: { key: "value" },
-   });
-   ```
+2. Add the source to `ALL_SOURCES` in `_shared/memory_fanout.ts`
 
-3. Add your module path to `scripts/memory_guard.ts` whitelist if needed.
+3. Wire data collection at choke points in paper-engine / paper-engine-tick
+
+4. Add to `scripts/memory_guard.ts` enforcement
 
 ## Enforcement
 
@@ -88,17 +108,34 @@ Any write to `atlas_memory_events` from non-approved modules will fail with:
 
 > **THIS BREAKS THE MEMORY, PLEASE ADJUST**
 
-## Sensor Tables
+The guard also enforces:
+- Fan-out usage at choke points (memoryFanOut, not memoryWrite directly)
+- Source participation contract (all 10 sources must report)
 
-Existing sensor/snapshot tables (`market_context_snapshots`, `derivatives_context_snapshots`, etc.) continue to exist for high-frequency capture. However:
+## Audit Queries
 
-- They are written **only** by their dedicated snapshotters
-- Key summaries are **also** written into Memory at lifecycle choke points
-- Learning and cross-layer reads should prefer Memory over raw sensor tables
+### Coverage check
+```sql
+SELECT phase, source, payload->>'status' AS status, count(*)
+FROM atlas_memory_events
+WHERE ts > now() - interval '6 hours'
+GROUP BY phase, source, payload->>'status'
+ORDER BY phase, source;
+```
 
-## Violation Response
+### Per-trade completeness
+```sql
+SELECT source, payload->>'status' AS status, payload->>'reason' AS reason
+FROM atlas_memory_events
+WHERE position_id = :pid AND phase = 'ENTRY_FILLED'
+ORDER BY source;
+```
 
-If any proposed change writes experience data outside Memory:
+All 10 registered sources must appear for each phase.
 
-> **THIS BREAKS THE MEMORY, PLEASE ADJUST**
-> Route this write through Memory (atlas_memory_events) via memoryWrite() helper.
+## Why This Matters
+
+- **Signal absent vs signal negative vs signal unavailable** — the Brain can now distinguish
+- **True cross-channel learning** — no more guessing what was missing
+- **Accurate attribution** — every channel's contribution (or absence) is recorded
+- **Safe addition of new probes** — register, wire, enforce
