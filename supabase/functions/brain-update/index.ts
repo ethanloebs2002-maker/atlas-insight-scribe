@@ -26,7 +26,7 @@
  */
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { brainLog, readRecentClosedMemory, newBrainTraceId } from "../_shared/brain.ts";
+import { brainLog, newBrainTraceId } from "../_shared/brain.ts";
 import {
   loadCompleteBundleForPosition,
   loadCompleteBundleBatch,
@@ -55,6 +55,28 @@ function sbAdmin() {
 function clamp(x: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, x)); }
 
 const EMA_ALPHA = 0.1;
+
+// ── Cursor Helpers (idempotency) ────────────────────────────────────────
+
+type SB = ReturnType<typeof createClient>;
+
+async function readCursor(sb: SB): Promise<string> {
+  const { data, error } = await sb
+    .from("atlas_brain_cursor")
+    .select("last_ts")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw new Error(`[brain] cursor read failed: ${error.message}`);
+  return (data?.last_ts ?? "1970-01-01T00:00:00Z") as string;
+}
+
+async function writeCursor(sb: SB, newTs: string): Promise<void> {
+  const { error } = await sb
+    .from("atlas_brain_cursor")
+    .update({ last_ts: newTs })
+    .eq("id", 1);
+  if (error) throw new Error(`[brain] cursor write failed: ${error.message}`);
+}
 
 // ── Boundary Helpers ────────────────────────────────────────────────────
 
@@ -144,23 +166,36 @@ serve(async (req) => {
 
   // ── Step 1: Read from Memory (the Brain's ONLY input) ─────────────────
   let closedEvents: any[] = [];
+  let cursorTs: string | null = null;
 
   if (positionId) {
     // Single-position mode: seed by phase only, don't require source=execution
     const { data } = await sb
       .from("atlas_memory_events")
-      .select("id,trace_id,position_id,decision_id,symbol,timeframe,phase,source,payload")
+      .select("id,ts,trace_id,position_id,decision_id,cohort_id,symbol,timeframe,phase,source,payload")
       .eq("position_id", positionId)
       .eq("phase", "EXIT_CLOSED")
       .order("ts", { ascending: false })
       .limit(1);
     closedEvents = data ?? [];
   } else {
-    closedEvents = await readRecentClosedMemory(body?.limit ?? 50, sb);
+    // Batch mode: cursor-based idempotent read (never re-learn same EXIT_CLOSED)
+    cursorTs = await readCursor(sb);
+
+    const { data, error } = await sb
+      .from("atlas_memory_events")
+      .select("id,ts,trace_id,position_id,decision_id,cohort_id,symbol,timeframe,phase,source,payload")
+      .eq("phase", "EXIT_CLOSED")
+      .gt("ts", cursorTs)
+      .order("ts", { ascending: true })
+      .limit(body?.limit ?? 50);
+
+    if (error) throw new Error(`[brain] EXIT_CLOSED load failed: ${error.message}`);
+    closedEvents = data ?? [];
   }
 
   if (!closedEvents.length) {
-    return new Response(JSON.stringify({ ok: true, updated: 0, msg: "no closed memory events" }), {
+    return new Response(JSON.stringify({ ok: true, updated: 0, msg: "no new closed memory events", cursor: cursorTs }), {
       headers: { ...corsHeaders, "content-type": "application/json" },
     });
   }
@@ -373,6 +408,19 @@ serve(async (req) => {
     await brainLog(brainLogs, sb);
   }
 
+  // ── Step 5: Advance cursor (batch mode only, after successful processing)
+  if (!positionId && closedEvents.length > 0) {
+    const maxTs = closedEvents
+      .map((e: any) => e.ts)
+      .filter(Boolean)
+      .sort()
+      .slice(-1)[0];
+    if (maxTs) {
+      await writeCursor(sb, maxTs);
+      console.log("[brain] cursor advanced", { newCursor: maxTs });
+    }
+  }
+
   return new Response(JSON.stringify({
     ok: true,
     scenario_updates: scenarioUpdates,
@@ -380,6 +428,7 @@ serve(async (req) => {
     memory_events_processed: closedEvents.length,
     positions_loaded: bundleMap.size,
     brain_trace: brainTrace,
+    cursor_advanced: !positionId,
     skipped: { cohort: skippedCohort, epoch: skippedEpoch, no_consensus: skippedNoConsensus },
   }), {
     headers: { ...corsHeaders, "content-type": "application/json" },

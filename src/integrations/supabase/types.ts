@@ -275,6 +275,21 @@ export type Database = {
         }
         Relationships: []
       }
+      atlas_brain_cursor: {
+        Row: {
+          id: number
+          last_ts: string
+        }
+        Insert: {
+          id?: number
+          last_ts?: string
+        }
+        Update: {
+          id?: number
+          last_ts?: string
+        }
+        Relationships: []
+      }
       atlas_brain_log: {
         Row: {
           cohort_id: string | null
