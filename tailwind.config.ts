@@ -54,6 +54,11 @@ export default {
         bullish: "hsl(var(--bullish))",
         bearish: "hsl(var(--bearish))",
         "neutral-signal": "hsl(var(--neutral))",
+        pillar: {
+          backbone: "hsl(var(--pillar-backbone))",
+          memory: "hsl(var(--pillar-memory))",
+          brain: "hsl(var(--pillar-brain))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
