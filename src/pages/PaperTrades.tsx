@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import HelpTooltip from "@/components/HelpTooltip";
 import { usePaperStats } from "@/hooks/use-paper-engine";
 import { useCohort } from "@/hooks/use-cohort";
-import { applyLegacyGate } from "@/lib/cohortFilter";
+import { applyLegacyGate, excludeMetaRows } from "@/lib/cohortFilter";
 import { buildTradeVM, buildTradeVMFromPosition } from "@/lib/build-trade-vm";
 import type { TradeVM } from "@/types/trade-vm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -74,13 +74,13 @@ export default function PaperTrades() {
   const engineEvents = stats?.events || [];
   const config = stats?.config || { publicHorizons: ["6m", "1y", "3y", "5y"], learningHorizons: ["3m", "6m", "1y", "3y", "5y"], cadenceMap: {} };
 
-  // ─── GLOBAL GATE: filter ALL data through legacy + epoch gates ──
+  // ─── GLOBAL GATE: filter ALL data through legacy + epoch + meta gates ──
   const decisions = useMemo(
-    () => applyLegacyGate(rawDecisions, cohort.includeLegacy),
+    () => excludeMetaRows(applyLegacyGate(rawDecisions, cohort.includeLegacy)),
     [rawDecisions, cohort.includeLegacy],
   );
   const trades = useMemo(
-    () => applyLegacyGate(rawTrades, cohort.includeLegacy),
+    () => excludeMetaRows(applyLegacyGate(rawTrades, cohort.includeLegacy)),
     [rawTrades, cohort.includeLegacy],
   );
 

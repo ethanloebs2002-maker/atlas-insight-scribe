@@ -40,3 +40,16 @@ export function applyLegacyGate<T extends WithCohort>(
     return false;
   });
 }
+
+/**
+ * Exclude rows flagged as legacy_oversized or is_test_trade in meta.
+ * Apply AFTER applyLegacyGate for a fully coherent dataset.
+ */
+export function excludeMetaRows<T extends Record<string, unknown>>(rows: T[]): T[] {
+  return rows.filter((r) => {
+    const m = (r as any)?.meta ?? {};
+    const legacy = m?.legacy_oversized === true || m?.legacy_oversized === "true";
+    const test = m?.is_test_trade === true || m?.is_test_trade === "true";
+    return !legacy && !test;
+  });
+}
