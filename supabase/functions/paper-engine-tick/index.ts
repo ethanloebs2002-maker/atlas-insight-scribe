@@ -553,8 +553,9 @@ class PaperEngineCore {
 
       // whale, news, strategy auto-fill as MISSING via fan-out
 
-      memoryFanOut(this.sb, "ENTRY_FILLED", traceId, fillCommon, fillSources)
-        .catch(e => console.warn("[memory] ENTRY_FILLED fan-out failed:", e.message));
+      try {
+        await memoryFanOut(this.sb, "ENTRY_FILLED", traceId, fillCommon, fillSources);
+      } catch (e) { console.warn("[memory] ENTRY_FILLED fan-out failed:", (e as any).message); }
     }
 
     if (entryComplete) {
@@ -864,8 +865,9 @@ class PaperEngineCore {
 
     // whale, news, strategy auto-fill as MISSING via fan-out
 
-    memoryFanOut(this.sb, "EXIT_CLOSED", exitTraceId, exitCommon, exitSources)
-      .catch(e => console.warn("[memory] EXIT_CLOSED fan-out failed:", e.message));
+    try {
+      await memoryFanOut(this.sb, "EXIT_CLOSED", exitTraceId, exitCommon, exitSources);
+    } catch (e) { console.warn("[memory] EXIT_CLOSED fan-out failed:", (e as any).message); }
 
     // ── Risk Lab: update performance on close ──
     if (pos.risk_profile_key) {
@@ -1015,54 +1017,8 @@ class PaperEngineCore {
 
       if (nowMs < timeStopMs) continue;
 
-      // Close at current candle close
-      const exitPrice = this.candle.close;
-      const entryPrice = Number(pos.entry_price ?? exitPrice);
-      const qty = Number(pos.qty ?? 1);
-      const side = pos.side as string;
-      const pnl = side === "LONG"
-        ? (exitPrice - entryPrice) * qty
-        : (entryPrice - exitPrice) * qty;
-
-      await this.sb.from("paper_positions").update({
-        status: "CLOSED",
-        closed_at: this.candle.ts,
-        exit_price: exitPrice,
-        close_reason: "TIME_STOP",
-        realized_pnl: pnl,
-      }).eq("id", pos.id);
-
-      // Mark decision
-      if (pos.decision_id) {
-        await this.sb.from("paper_decisions")
-          .update({ engine_status: "COMPLETE" })
-          .eq("id", pos.decision_id);
-      }
-
-      // Learning ledger
-      await this.sb.from("learning_ledger").upsert({
-        position_id: pos.id,
-        decision_id: pos.decision_id ?? null,
-        asset_id: pos.symbol,
-        outcome_type: "CLOSED_TIME",
-        realized_pnl: pnl,
-        scenario_keys: [],
-        metadata: { close_reason: "TIME_STOP", max_hold_ms: maxHold, candle_ts: this.candle.ts },
-      }, { onConflict: "position_id" });
-
-      // Reputation update (non-blocking)
-      fetch(`${supabaseUrl}/functions/v1/scenario-reputation-update`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${svcKey}` },
-        body: JSON.stringify({ position_id: pos.id, outcome_type: "CLOSED_TIME", realized_pnl: pnl }),
-      }).catch(e => console.warn("[time-stop] reputation update failed:", e.message));
-
-      await this.emit("POSITION", pos.id, "POSITION_CLOSED", {
-        close_reason: "TIME_STOP",
-        exit_price: exitPrice,
-        realized_pnl: pnl,
-        max_hold_ms: maxHold,
-      });
+      // Route through closePosition so EXIT_CLOSED Memory fan-out fires
+      await this.closePosition(pos.id, this.candle.close, "TIME_STOP");
     }
   }
 
