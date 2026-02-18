@@ -366,6 +366,31 @@ async function emitDecision(
           if (s.contributed_confidence != null) scenarioWeights[s.scenario_key] = s.contributed_confidence;
         }
 
+        // ── Pre-compute decision verdict for Memory contract ──
+        const prePolicy = await getActivePolicy();
+        const preExposure = await getExposure();
+        const preSide = direction === "UP" ? "LONG" : "SHORT";
+        const preStopLevel = stopLoss.level;
+        const preTpLevel = targets[targets.length - 1]?.price;
+        const preRiskDist = Math.abs(((entryZone.priceRange[0] + entryZone.priceRange[1]) / 2) - preStopLevel);
+        const preRewardDist = Math.abs(preTpLevel - ((entryZone.priceRange[0] + entryZone.priceRange[1]) / 2));
+        const preRR = preRiskDist > 0 ? preRewardDist / preRiskDist : 0;
+        const preEV = policyProbability * preRR - (1 - policyProbability);
+
+        const decisionReasons: string[] = [];
+        if (prePolicy) {
+          if (policyProbability < (prePolicy.min_prob || 0.35)) decisionReasons.push(`PROB_TOO_LOW`);
+          if (!prePolicy.allow_shorts && preSide === "SHORT") decisionReasons.push(`SHORTS_DISABLED`);
+          if (preExposure.open >= (prePolicy.max_open || 10)) decisionReasons.push(`MAX_OPEN`);
+          if (preExposure.pending >= (prePolicy.max_pending || 20)) decisionReasons.push(`MAX_PENDING`);
+          if (preRR < (prePolicy.min_rr || 1.2)) decisionReasons.push(`RR_TOO_LOW`);
+          if (prePolicy.require_ev_positive && preEV <= 0) decisionReasons.push(`EV_NEGATIVE`);
+        }
+        const decisionApproved = decisionReasons.length === 0;
+        const decisionAction = decisionApproved
+          ? (direction === "UP" ? "ENTER_LONG" : "ENTER_SHORT")
+          : "NO_TRADE";
+
         const decSources: SourceEvent[] = [
           { source: "consensus", status: "OK", data: {
             direction, probability, policyProbability,
@@ -380,8 +405,19 @@ async function emitDecision(
             scenario_weights: scenarioWeights,
             regime: best.regime || null,
             // Deterministic blueprint ID for strategy learning
-            // Format: baseline_v1:<type>:<regime>:<timeframe>:<direction>
             strategy_blueprint_id: `baseline_v1:${best.type ?? "neutral"}:${(best.regime ?? "na").toLowerCase()}:${timeframe}:${direction}`,
+            // ── Decision Output Contract ──
+            decision: {
+              approved: decisionApproved,
+              action: decisionAction,
+              reasons: decisionReasons,
+              thresholds: {
+                minPolicyProbability: prePolicy?.min_prob ?? 0.35,
+                minConsensusScore: prePolicy?.min_consensus ?? null,
+                minRR: prePolicy?.min_rr ?? 1.2,
+                evPositiveRequired: prePolicy?.require_ev_positive ?? false,
+              },
+            },
           }},
           { source: "execution", status: "MISSING", reason: "not executed yet" },
         ];
