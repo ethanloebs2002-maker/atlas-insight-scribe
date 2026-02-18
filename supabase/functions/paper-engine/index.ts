@@ -1289,6 +1289,12 @@ async function fetchStats(asset_id?: string, includeLearning = false) {
 async function runFullEvaluation(asset_id: string, timeframe: string, horizon?: string, emittedBy: string = "UNKNOWN") {
   const guard = await checkCadenceGuard(emittedBy, asset_id);
   if (!guard.allowed) {
+    await emitEvent(null, "ENGINE", null, "CADENCE_BLOCKED", {
+      symbol: asset_id,
+      timeframe,
+      emitted_by: emittedBy,
+      reason: guard.reason,
+    });
     return { run_id: null, status: "CADENCE_BLOCKED", decision_type: "SKIPPED", reason: guard.reason };
   }
 
