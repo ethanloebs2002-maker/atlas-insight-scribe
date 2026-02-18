@@ -5138,6 +5138,10 @@ export type Database = {
       }
     }
     Functions: {
+      atlas_settings_touch_asset_cadence: {
+        Args: { p_asset: string; p_ts: string }
+        Returns: undefined
+      }
       brain_acquire_lease: {
         Args: { p_lease_seconds?: number; p_owner: string }
         Returns: boolean

@@ -183,18 +183,31 @@ async function recordDecision(body: any) {
 }
 
 // ─── CADENCE GUARD ───────────────────────────────────────────────
+type CadenceResult = { allowed: boolean; reason?: string };
+
 async function checkCadenceGuard(
   emittedBy: string,
   assetId: string
-): Promise<{ allowed: boolean; reason?: string }> {
+): Promise<CadenceResult> {
   // Manual always allowed
   if (emittedBy === "MANUAL_EVALUATE") return { allowed: true };
 
-  const { data: settings } = await supabase
+  // Hard guard: prevent writing key "undefined" or empty
+  if (!assetId || typeof assetId !== "string" || assetId.trim() === "" || assetId === "undefined") {
+    return { allowed: false, reason: "Cadence guard: missing assetId" };
+  }
+
+  const { data: settings, error } = await supabase
     .from("atlas_settings")
-    .select("*")
+    .select("eval_cadence_ms, eval_last_by_asset")
     .eq("id", "global")
     .maybeSingle();
+
+  if (error) {
+    // Fail-open on settings read issues (do not brick evaluations)
+    console.warn("[cadence] settings read failed:", error.message);
+    return { allowed: true };
+  }
   if (!settings) return { allowed: true };
 
   const cadenceMs = settings.eval_cadence_ms || 3600000;
@@ -210,14 +223,18 @@ async function checkCadenceGuard(
     }
   }
 
-  // Update ONLY this asset key
+  // Race-safe update: atomic JSONB merge on the DB side (single statement)
   const nowIso = new Date().toISOString();
-  const next = { ...lastByAsset, [assetId]: nowIso };
+  const { error: upErr } = await supabase.rpc("atlas_settings_touch_asset_cadence", {
+    p_asset: assetId,
+    p_ts: nowIso,
+  });
 
-  await supabase
-    .from("atlas_settings")
-    .update({ eval_last_by_asset: next, updated_at: nowIso } as any)
-    .eq("id", "global");
+  if (upErr) {
+    // Fail-open if cadence write fails (don't brick eval)
+    console.warn("[cadence] settings write failed:", upErr.message);
+    return { allowed: true };
+  }
 
   return { allowed: true };
 }
