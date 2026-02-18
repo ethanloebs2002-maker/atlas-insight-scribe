@@ -3,7 +3,8 @@
  *
  * Detects writes to atlas_memory_events from non-approved modules,
  * detects new ad-hoc event tables that bypass Memory,
- * and validates source participation contract.
+ * validates source participation contract,
+ * and ensures memory_fanout.ts contains no external fetches.
  *
  * Usage: npx tsx scripts/memory_guard.ts
  *
@@ -48,6 +49,13 @@ const UI_INSERT_WHITELIST = [
 const REQUIRED_SOURCES = [
   "consensus", "market", "orderbook", "derivatives",
   "execution", "risk_lab", "policy", "whale", "news", "strategy",
+];
+
+// ── External fetch patterns (forbidden in memory_fanout.ts) ──────────
+const EXTERNAL_FETCH_PATTERNS = [
+  /fetch\s*\(\s*[`'"]https?:\/\//i,
+  /fetch\s*\(\s*`\$\{/i,
+  /new\s+WebSocket\s*\(/i,
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -151,7 +159,6 @@ for (const file of srcFiles) {
 }
 
 // Check 4: Validate fan-out completeness in choke-point code
-// Ensure memoryFanOut is used at all 3 choke points (not memoryWrite directly)
 const CHOKE_POINT_FILES = [
   "supabase/functions/paper-engine/index.ts",
   "supabase/functions/paper-engine-tick/index.ts",
@@ -162,7 +169,6 @@ for (const relPath of CHOKE_POINT_FILES) {
   if (!fullPath) continue;
   const content = fs.readFileSync(fullPath, "utf-8");
 
-  // Check for direct memoryWrite calls (should use memoryFanOut instead)
   const directWritePattern = /memoryWrite\s*\(/g;
   const fanOutPattern = /memoryFanOut\s*\(/g;
 
@@ -175,6 +181,27 @@ for (const relPath of CHOKE_POINT_FILES) {
       content: "Uses memoryWrite() directly instead of memoryFanOut()",
       reason: `Choke-point file must use memoryFanOut() for full source coverage. All ${REQUIRED_SOURCES.length} sources must report at each phase.`,
     });
+  }
+}
+
+// Check 5: memory_fanout.ts must not contain external fetches
+const fanoutPath = allFiles.find(f => normalize(f).includes("_shared/memory_fanout.ts"));
+if (fanoutPath) {
+  const content = fs.readFileSync(fanoutPath, "utf-8");
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Skip comments
+    if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
+    for (const pattern of EXTERNAL_FETCH_PATTERNS) {
+      if (pattern.test(line)) {
+        violations.push({
+          file: fanoutPath, line: i + 1,
+          content: line.trim().substring(0, 120),
+          reason: "Memory fan-out MUST NOT call fetch() or open WebSocket connections. Memory may not fetch external data.",
+        });
+      }
+    }
   }
 }
 
@@ -194,5 +221,6 @@ if (violations.length > 0) {
   console.log("✅ Memory Guard passed — no violations found.");
   console.log(`   ✓ Source participation contract: ${REQUIRED_SOURCES.length} sources required at each choke point`);
   console.log(`   ✓ Fan-out enforcement: choke-point files use memoryFanOut()`);
+  console.log(`   ✓ Backbone isolation: memory_fanout.ts contains no external fetches`);
   process.exit(0);
 }

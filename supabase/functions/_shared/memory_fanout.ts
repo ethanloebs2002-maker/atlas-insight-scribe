@@ -4,6 +4,12 @@
  * Ensures every registered Memory source emits a fingerprint
  * at each lifecycle choke point. No silent gaps.
  *
+ * BACKBONE SAFE — This file MUST NOT call fetch() to external URLs.
+ * All data comes from canonical DB tables only.
+ *
+ * MEMORY SAFE — reads only, never writes raw data.
+ * All writes go through memoryWrite().
+ *
  * Usage:
  *   import { memoryFanOut } from "../_shared/memory_fanout.ts";
  *   await memoryFanOut(sb, phase, traceId, common, knownEvents);
@@ -20,6 +26,10 @@ const ALL_SOURCES = [
   "consensus", "market", "orderbook", "derivatives",
   "execution", "risk_lab", "policy", "whale", "news", "strategy",
 ];
+
+/** Max payload sizes */
+const MAX_OK_BYTES = 5120;
+const MAX_ABSENT_BYTES = 512;
 
 export type MemoryStatus = "OK" | "MISSING" | "FAILED";
 
@@ -38,7 +48,27 @@ interface FanOutCommon {
 }
 
 /**
+ * Truncate payload to size cap.
+ * OK events → 5KB, MISSING/FAILED → 512B
+ */
+function capPayload(payload: Record<string, unknown>, status: MemoryStatus): Record<string, unknown> {
+  const limit = status === "OK" ? MAX_OK_BYTES : MAX_ABSENT_BYTES;
+  const json = JSON.stringify(payload);
+  if (json.length <= limit) return payload;
+
+  // For OK events, keep status + truncated flag + first few keys
+  if (status === "OK") {
+    return { status: "OK", _truncated: true, _original_size: json.length };
+  }
+  // For MISSING/FAILED, keep status + reason only
+  return { status, reason: String(payload.reason ?? "payload truncated").slice(0, 200) };
+}
+
+/**
  * Fan out Memory events for ALL registered sources at a lifecycle choke point.
+ *
+ * BACKBONE SAFE: This function does NOT call fetch() to any external URL.
+ * All source data must be provided by the caller (who reads from canonical DB tables).
  *
  * @param sb       - Supabase admin client
  * @param phase    - DECISION_EMIT | ENTRY_FILLED | EXIT_CLOSED
@@ -65,6 +95,11 @@ export async function memoryFanOut(
   for (const source of ALL_SOURCES) {
     const k = knownMap.get(source);
     if (k) {
+      const rawPayload: Record<string, unknown> = {
+        status: k.status,
+        ...(k.data ? { data: k.data } : {}),
+        ...(k.reason ? { reason: k.reason } : {}),
+      };
       events.push({
         trace_id: traceId,
         position_id: common.position_id ?? null,
@@ -73,11 +108,7 @@ export async function memoryFanOut(
         timeframe: common.timeframe ?? null,
         phase,
         source,
-        payload: {
-          status: k.status,
-          ...(k.data ? { data: k.data } : {}),
-          ...(k.reason ? { reason: k.reason } : {}),
-        },
+        payload: capPayload(rawPayload, k.status),
       });
     } else {
       // Automatic MISSING for unrepresented sources
