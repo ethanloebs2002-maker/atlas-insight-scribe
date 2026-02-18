@@ -402,20 +402,12 @@ async function emitDecision(
           else decSources.push({ source: "derivatives", status: "MISSING", reason: "no derivatives snapshot" });
         } catch { decSources.push({ source: "derivatives", status: "FAILED", reason: "derivatives read failed" }); }
 
-        // Policy source (for fan-out; actual policy loaded below for gating)
-        try {
-          const pol = await getActivePolicy();
-          if (pol) decSources.push({ source: "policy", status: "OK", data: { version_tag: pol.version_tag, min_prob: pol.min_prob, min_rr: pol.min_rr } });
-          else decSources.push({ source: "policy", status: "MISSING", reason: "no active policy" });
-        } catch { decSources.push({ source: "policy", status: "FAILED", reason: "policy read failed" }); }
+        // Policy source deferred until after gate (to avoid duplicate policy reads)
+        decSources.push({ source: "policy", status: "MISSING", reason: "deferred until gate" });
 
         // NOTE: memoryFanOut is deferred until AFTER the authoritative gate
         // so we can inject the real decision contract. See below.
-
-        // Store references for deferred fan-out
-        var _decTraceId = decTraceId;
-        var _decCommon = decCommon;
-        var _decSources = decSources;
+        const deferredFanout = { traceId: decTraceId, common: decCommon, sources: decSources };
       }
 
       // ── Hook A: Context snapshots on decision emission ──
@@ -477,10 +469,15 @@ async function emitDecision(
           }
         }
 
+        let gateRR: number | null = null;
+        let gateEV: number | null = null;
+        let gateExposure: { open: number; pending: number } | null = null;
+
         if (policy) {
           if (policyProbability < (policy.min_prob || 0.35)) rejectionReasons.push(`policy_prob ${policyProbability.toFixed(3)} < min_prob ${policy.min_prob}`);
           if (!policy.allow_shorts && side === "SHORT") rejectionReasons.push("shorts disabled by policy");
           const exposure = await getExposure();
+          gateExposure = exposure;
           if (exposure.open >= (policy.max_open || 10)) rejectionReasons.push(`max_open reached: ${exposure.open}`);
           if (exposure.pending >= (policy.max_pending || 20)) rejectionReasons.push(`max_pending reached: ${exposure.pending}`);
 
@@ -489,43 +486,68 @@ async function emitDecision(
           const riskDist = Math.abs(entryPrice - stopLevel);
           const rewardDist = Math.abs(tpLevel - entryPrice);
           const rr = riskDist > 0 ? rewardDist / riskDist : 0;
+          gateRR = rr;
           if (rr < (policy.min_rr || 1.2)) rejectionReasons.push(`R:R ${rr.toFixed(2)} < min_rr ${policy.min_rr}`);
 
           // EV check using policyProbability
           if (policy.require_ev_positive) {
             const ev = policyProbability * rr - (1 - policyProbability);
+            gateEV = ev;
             if (ev <= 0) rejectionReasons.push(`EV ${ev.toFixed(3)} <= 0 (policy_prob=${policyProbability.toFixed(3)}, rr=${rr.toFixed(2)})`);
           }
         }
 
-        // ── Inject authoritative Decision Output Contract into consensus source ──
-        const gateApproved = rejectionReasons.length === 0;
-        const gateAction = gateApproved
-          ? (direction === "UP" ? "ENTER_LONG" : "ENTER_SHORT")
-          : "NO_TRADE";
-        if (_decSources) {
-          const consensusSrc = _decSources.find((s: SourceEvent) => s.source === "consensus");
-          if (consensusSrc) {
+        // ── Inject authoritative Decision Output Contract ──
+        {
+          const gateApproved = rejectionReasons.length === 0;
+          const gateAction = gateApproved
+            ? (direction === "UP" ? "ENTER_LONG" : "ENTER_SHORT")
+            : "NO_TRADE";
+
+          // Patch consensus source with decision
+          const consensusSrc = deferredFanout.sources.find((s: SourceEvent) => s.source === "consensus");
+          if (consensusSrc && consensusSrc.status === "OK") {
             (consensusSrc as any).data.decision = {
               approved: gateApproved,
               action: gateAction,
-              reasons: rejectionReasons.map(r =>
-                r.startsWith("policy_prob") ? "PROB_TOO_LOW" :
-                r.startsWith("shorts disabled") ? "SHORTS_DISABLED" :
-                r.startsWith("max_open") ? "MAX_OPEN" :
-                r.startsWith("max_pending") ? "MAX_PENDING" :
-                r.startsWith("R:R") ? "RR_TOO_LOW" :
-                r.startsWith("EV") ? "EV_NEGATIVE" :
-                r.startsWith("NO_MARKET") ? "NO_MARKET_CONTEXT" : r
-              ),
+              reasons_raw: rejectionReasons,
               thresholds: {
                 minPolicyProbability: policy?.min_prob ?? 0.35,
                 minRR: policy?.min_rr ?? 1.2,
                 evPositiveRequired: policy?.require_ev_positive ?? false,
+                allowShorts: policy?.allow_shorts ?? true,
+                maxOpen: policy?.max_open ?? null,
+                maxPending: policy?.max_pending ?? null,
+              },
+              gate_values: {
+                policyProbability,
+                rr: gateRR,
+                ev: gateEV,
+                exposure_open: gateExposure?.open ?? null,
+                exposure_pending: gateExposure?.pending ?? null,
               },
             };
           }
-          memoryFanOut(supabase, "DECISION_EMIT", _decTraceId, _decCommon, _decSources)
+
+          // Patch policy source using the already-loaded policy
+          const policySrc = deferredFanout.sources.find((s: SourceEvent) => s.source === "policy");
+          if (policySrc) {
+            if (policy) {
+              policySrc.status = "OK";
+              (policySrc as any).data = {
+                version_tag: policy.version_tag, min_prob: policy.min_prob,
+                min_rr: policy.min_rr, require_ev_positive: policy.require_ev_positive,
+                allow_shorts: policy.allow_shorts, max_open: policy.max_open,
+                max_pending: policy.max_pending,
+              };
+              delete (policySrc as any).reason;
+            } else {
+              (policySrc as any).reason = "no active policy";
+            }
+          }
+
+          // Fire fan-out once, after authoritative decision is injected
+          memoryFanOut(supabase, "DECISION_EMIT", deferredFanout.traceId, deferredFanout.common, deferredFanout.sources)
             .catch((e: Error) => console.warn("[memory] DECISION_EMIT fan-out failed:", e.message));
         }
 
