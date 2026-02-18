@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { COHORTS } from "@/hooks/use-cohort";
+import { isLegacyUnlocked } from "@/lib/legacyGate";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -69,10 +71,13 @@ function useArchiveOrders(symbol: string | null) {
 
 export default function ArchivePage() {
   const [symbolFilter, setSymbolFilter] = useState<string | null>(null);
+  const locked = !isLegacyUnlocked();
 
   const { data: decisions = [], isLoading: dLoading } = useArchiveDecisions(symbolFilter);
   const { data: positions = [], isLoading: pLoading } = useArchivePositions(symbolFilter);
   const { data: orders = [], isLoading: oLoading } = useArchiveOrders(symbolFilter);
+
+  if (locked) return <Navigate to="/paper-trades" replace />;
 
   return (
     <div className="flex flex-col h-full min-w-0 overflow-hidden">
