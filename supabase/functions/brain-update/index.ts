@@ -18,10 +18,28 @@
  *
  * BACKBONE SAFE — no external fetches.
  * MEMORY SAFE — reads only, never writes to Memory.
+ *
+ * LEARNING BOUNDARY:
+ * - Brain NEVER learns from legacy_prebrain cohort.
+ * - Brain requires DECISION_EMIT:consensus in every bundle (fail-closed).
+ * - Optional epoch gate via BRAIN_EPOCH_START_TS env var.
  */
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { brainLog, readRecentClosedMemory, newBrainTraceId, loadMemoryBundleBatch } from "../_shared/brain.ts";
+import { brainLog, readRecentClosedMemory, newBrainTraceId } from "../_shared/brain.ts";
+import {
+  loadCompleteBundleForPosition,
+  loadCompleteBundleBatch,
+  type MemoryBundle,
+  type MemoryEventRow,
+} from "../_shared/memoryBundleContract.ts";
+
+// ── Learning Boundary Constants ─────────────────────────────────────────
+const COHORT_BRAIN = "brain_online_2026_02_17";
+const COHORT_LEGACY = "legacy_prebrain";
+
+// Optional epoch gate: Brain ignores EXIT_CLOSED before this timestamp.
+const BRAIN_EPOCH_START_TS = Deno.env.get("BRAIN_EPOCH_START_TS") || "";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,6 +55,38 @@ function sbAdmin() {
 function clamp(x: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, x)); }
 
 const EMA_ALPHA = 0.1;
+
+// ── Boundary Helpers ────────────────────────────────────────────────────
+
+function getExitClosedEvent(mb: MemoryBundle): MemoryEventRow | null {
+  return (Object.values(mb.bundle) as MemoryEventRow[]).find(e => e.phase === "EXIT_CLOSED") ?? null;
+}
+
+function parseTs(ev: MemoryEventRow): number | null {
+  const t = ev?.ts ?? ev?.created_at;
+  if (!t) return null;
+  const ms = Date.parse(t);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function epochAllows(ev: MemoryEventRow): boolean {
+  if (!BRAIN_EPOCH_START_TS) return true;
+  const gate = Date.parse(BRAIN_EPOCH_START_TS);
+  if (!Number.isFinite(gate)) return true;
+  const evTs = parseTs(ev);
+  if (evTs == null) return true;
+  return evTs >= gate;
+}
+
+function cohortAllows(ev: MemoryEventRow): boolean {
+  const c = ev?.cohort_id ?? null;
+  // Fail closed: if cohort_id missing, do not learn
+  if (!c) return false;
+  if (c === COHORT_LEGACY) return false;
+  return c === COHORT_BRAIN;
+}
+
+// ── Extractors ──────────────────────────────────────────────────────────
 
 /** Extract scenario keys from DECISION_EMIT consensus Memory event */
 function extractScenarioKeys(bundle: Record<string, any>): {
@@ -82,6 +132,8 @@ function extractOutcome(bundle: Record<string, any>): {
   };
 }
 
+// ── Main Handler ────────────────────────────────────────────────────────
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -94,7 +146,6 @@ serve(async (req) => {
   let closedEvents: any[] = [];
 
   if (positionId) {
-    // Single position mode
     const { data } = await sb
       .from("atlas_memory_events")
       .select("id,trace_id,position_id,symbol,timeframe,phase,source,payload")
@@ -114,62 +165,76 @@ serve(async (req) => {
     });
   }
 
-  // ── Step 2: Batch load Memory bundles (eliminates N+1) ────────────────
+  // ── Step 2: Load complete bundles using the contract loader ────────────
   const positionIds = [...new Set(closedEvents.map(e => e.position_id).filter(Boolean))];
 
-  let bundleMap: Map<string, { bundle: Record<string, any>; allIds: string[]; events: any[] }>;
+  let bundleMap: Map<string, MemoryBundle>;
 
   if (positionId) {
-    // Single position mode — load position events + DECISION_EMIT via decision_id
-    const { data: posData } = await sb
-      .from("atlas_memory_events")
-      .select("id,trace_id,decision_id,symbol,timeframe,phase,source,payload")
-      .eq("position_id", positionId)
-      .in("phase", ["ENTRY_FILLED", "EXIT_CLOSED"])
-      .order("ts", { ascending: true });
-
-    const posEvents = posData ?? [];
-
-    // Get decision_id to fetch DECISION_EMIT (which has position_id=NULL)
-    const decId = posEvents.find(e => e.decision_id)?.decision_id;
-    let decEvents: any[] = [];
-    if (decId) {
-      const { data: dd } = await sb
-        .from("atlas_memory_events")
-        .select("id,trace_id,decision_id,symbol,timeframe,phase,source,payload")
-        .eq("decision_id", decId)
-        .eq("phase", "DECISION_EMIT")
-        .order("ts", { ascending: true });
-      decEvents = dd ?? [];
-    }
-
-    const allEvts = [...posEvents, ...decEvents];
-    const bundle: Record<string, any> = {};
-    const allIds: string[] = [];
-    for (const ev of allEvts) {
-      bundle[`${ev.phase}:${ev.source}`] = ev;
-      allIds.push(ev.id);
-    }
-    bundleMap = new Map([[positionId, { bundle, allIds, events: allEvts }]]);
+    const mb = await loadCompleteBundleForPosition(sb, positionId);
+    bundleMap = new Map([[positionId, mb]]);
   } else {
-    // Batch mode — single query for all positions
-    bundleMap = await loadMemoryBundleBatch(positionIds, sb);
+    bundleMap = await loadCompleteBundleBatch(sb, positionIds);
   }
 
   // ── Step 3: Process each closed trade ─────────────────────────────────
   let scenarioUpdates = 0;
   let strategyUpdates = 0;
+  let skippedCohort = 0;
+  let skippedEpoch = 0;
+  let skippedNoConsensus = 0;
   const brainLogs: any[] = [];
 
   for (const memEvent of closedEvents) {
     const pid = memEvent.position_id;
     if (!pid) continue;
 
-    const bundleData = bundleMap.get(pid);
-    if (!bundleData) continue;
+    const mb = bundleMap.get(pid);
+    if (!mb) continue;
 
-    const { bundle, allIds } = bundleData;
+    const { bundle, allIds } = mb;
     const symbol = memEvent.symbol;
+
+    // ── Boundary enforcement ──────────────────────────────────────────
+    const exitEv = getExitClosedEvent(mb);
+    if (!exitEv) {
+      console.log("[brain] skip: no EXIT_CLOSED in bundle", { positionId: pid });
+      continue;
+    }
+
+    if (!cohortAllows(exitEv)) {
+      console.log("[brain] skip: cohort blocked", { positionId: pid, cohort_id: exitEv.cohort_id });
+      skippedCohort++;
+      continue;
+    }
+
+    if (!epochAllows(exitEv)) {
+      console.log("[brain] skip: before epoch", { positionId: pid, ts: exitEv.ts ?? exitEv.created_at });
+      skippedEpoch++;
+      continue;
+    }
+
+    // ── Contract assertion: DECISION_EMIT:consensus must be present ──
+    const consensus = bundle["DECISION_EMIT:consensus"];
+    if (!consensus) {
+      console.log("[brain] skip: missing DECISION_EMIT:consensus (bundle contract violated)", {
+        positionId: pid,
+        decisionId: mb.decisionId,
+        keysPresent: Object.keys(bundle),
+      });
+      skippedNoConsensus++;
+      continue;
+    }
+
+    // ── Boundary proof log ────────────────────────────────────────────
+    console.log("[brain] learn: bundle ok", {
+      positionId: pid,
+      decisionId: mb.decisionId,
+      traceId: mb.traceId,
+      cohort_id: exitEv.cohort_id ?? null,
+      hasConsensus: true,
+      phases: [...new Set(mb.events.map(e => e.phase))].sort(),
+    });
 
     // Extract outcome from EXIT_CLOSED execution event
     const { outcome, realizedPnl, realizedR, strategyBlueprintId: exitBpId } = extractOutcome(bundle);
@@ -225,6 +290,7 @@ serve(async (req) => {
 
       await sb.from("scenario_reputation").upsert({
         scenario_key: key, symbol: sym, timeframe: tf, regime: rg,
+        cohort_id: COHORT_BRAIN,
         ...posterior,
         updated_at: new Date().toISOString(),
       }, { onConflict: "scenario_key,symbol,timeframe,regime" });
@@ -234,6 +300,7 @@ serve(async (req) => {
         target_table: "scenario_reputation",
         target_key: `${key}|${sym}|${tf}|${rg}`,
         symbol: sym,
+        cohort_id: COHORT_BRAIN,
         update_type: "BAYESIAN_UPDATE",
         prior_state: { alpha: alpha0, beta: beta0, samples: samples0, ema_winrate: ema0 },
         posterior_state: posterior,
@@ -272,6 +339,7 @@ serve(async (req) => {
 
       await sb.from("strategy_reputation").upsert({
         blueprint_id: bpId,
+        cohort_id: COHORT_BRAIN,
         ...posterior,
         last_updated: new Date().toISOString(),
         notes: JSON.stringify({ outcome, pnl: realizedPnl, r: realizedR }),
@@ -282,6 +350,7 @@ serve(async (req) => {
         target_table: "strategy_reputation",
         target_key: bpId,
         symbol,
+        cohort_id: COHORT_BRAIN,
         update_type: "REPUTATION_BLEND",
         prior_state: { reputation: prevRep, confidence: prevConf },
         posterior_state: posterior,
@@ -306,6 +375,7 @@ serve(async (req) => {
     memory_events_processed: closedEvents.length,
     positions_loaded: bundleMap.size,
     brain_trace: brainTrace,
+    skipped: { cohort: skippedCohort, epoch: skippedEpoch, no_consensus: skippedNoConsensus },
   }), {
     headers: { ...corsHeaders, "content-type": "application/json" },
   });
