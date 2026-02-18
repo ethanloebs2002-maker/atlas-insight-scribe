@@ -55,6 +55,7 @@ function sbAdmin() {
 function clamp(x: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, x)); }
 
 const EMA_ALPHA = 0.1;
+const LEASE_SECONDS = 90;
 
 // ── Cursor Helpers (idempotency) ────────────────────────────────────────
 
@@ -201,7 +202,7 @@ serve(async (req) => {
 
   // ── Lease lock: prevent concurrent batch runs from double-learning ────
   if (isBatch) {
-    const gotLock = await acquireLease(sb, brainTrace, 90);
+    const gotLock = await acquireLease(sb, brainTrace, LEASE_SECONDS);
     if (!gotLock) {
       return new Response(JSON.stringify({
         ok: true, updated: 0, msg: "lease busy; retry next cron",
@@ -210,14 +211,14 @@ serve(async (req) => {
   }
 
   try {
-    return await runBrainUpdate(sb, body, positionId, brainTrace, isBatch);
+    return await runBrainUpdate(sb, body, positionId, brainTrace, isBatch, Date.now());
   } finally {
     if (isBatch) await releaseLease(sb, brainTrace);
   }
 });
 
 async function runBrainUpdate(
-  sb: SB, body: any, positionId: string | null, brainTrace: string, isBatch: boolean,
+  sb: SB, body: any, positionId: string | null, brainTrace: string, isBatch: boolean, leaseStartedAt: number = Date.now(),
 ): Promise<Response> {
   // ── Step 1: Read from Memory (the Brain's ONLY input) ─────────────────
   let closedEvents: any[] = [];
@@ -271,6 +272,20 @@ async function runBrainUpdate(
   let skippedNoConsensus = 0;
   let maxHandledTs: string | null = null;
   const brainLogs: any[] = [];
+
+  const renewEveryMs = Math.floor(LEASE_SECONDS * 1000 * 0.6);
+  let lastRenewAt = leaseStartedAt;
+
+  async function maybeRenew() {
+    if (!isBatch) return;
+    const now = Date.now();
+    if (now - lastRenewAt > renewEveryMs) {
+      const ok = await renewLease(sb, brainTrace, LEASE_SECONDS);
+      if (!ok) throw new Error("[brain] lost lease during run");
+      lastRenewAt = now;
+      console.log("[brain] lease renewed", { brainTrace });
+    }
+  }
 
   for (const memEvent of closedEvents) {
     const pid = memEvent.position_id;
@@ -430,8 +445,9 @@ async function runBrainUpdate(
       strategyUpdates++;
     }
 
-    // ── Bump cursor: this event was successfully learned ──────────────
+    // ── Bump cursor & renew lease if needed ─────────────────────────
     maxHandledTs = bumpMaxHandled(maxHandledTs, exitEv.ts ?? exitEv.created_at);
+    await maybeRenew();
   }
 
   // ── Step 4: Log all brain updates for provenance ────────────────────
