@@ -83,26 +83,25 @@ async function writeCursorCAS(sb: SB, expectedOld: string, newTs: string): Promi
 }
 
 async function acquireLease(sb: SB, owner: string, leaseSeconds = 90): Promise<boolean> {
-  const now = new Date().toISOString();
-  const until = new Date(Date.now() + leaseSeconds * 1000).toISOString();
-  const { data, error } = await sb
-    .from("atlas_brain_cursor")
-    .update({ locked_until: until, lock_owner: owner })
-    .eq("id", 1)
-    .or(`locked_until.is.null,locked_until.lt.${now}`)
-    .select("lock_owner")
-    .maybeSingle();
+  const { data, error } = await sb.rpc("brain_acquire_lease", {
+    p_owner: owner, p_lease_seconds: leaseSeconds,
+  });
   if (error) throw new Error(`[brain] lease acquire failed: ${error.message}`);
-  return data?.lock_owner === owner;
+  return data === true;
+}
+
+async function renewLease(sb: SB, owner: string, leaseSeconds = 90): Promise<boolean> {
+  const { data, error } = await sb.rpc("brain_renew_lease", {
+    p_owner: owner, p_lease_seconds: leaseSeconds,
+  });
+  if (error) throw new Error(`[brain] lease renew failed: ${error.message}`);
+  return data === true;
 }
 
 async function releaseLease(sb: SB, owner: string): Promise<void> {
-  const { error } = await sb
-    .from("atlas_brain_cursor")
-    .update({ locked_until: null, lock_owner: null })
-    .eq("id", 1)
-    .eq("lock_owner", owner);
+  const { data, error } = await sb.rpc("brain_release_lease", { p_owner: owner });
   if (error) throw new Error(`[brain] lease release failed: ${error.message}`);
+  if (!data) console.log("[brain] lease release: no row matched (already expired?)");
 }
 
 function bumpMaxHandled(current: string | null, ts?: string | null): string | null {
