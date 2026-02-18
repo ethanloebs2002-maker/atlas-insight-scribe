@@ -179,6 +179,50 @@ for (const relPath of CHOKE_POINT_FILES) {
   }
 }
 
+// Check 4b: paper-engine-tick must emit EXIT_CLOSED via closePosition (no bypass)
+const tickPath = allFiles.find(f => normalize(f).endsWith("supabase/functions/paper-engine-tick/index.ts"));
+if (tickPath) {
+  const content = fs.readFileSync(tickPath, "utf-8");
+  const lines = content.split("\n");
+
+  // Detect direct status='CLOSED' updates outside closePosition method
+  // Pattern: .update({ ... status: "CLOSED" ... }) NOT inside closePosition
+  const closePositionMatch = content.match(/(?:private\s+)?async\s+closePosition\s*\(/);
+  if (!closePositionMatch) {
+    violations.push({
+      file: tickPath, line: 0,
+      content: "No closePosition() method found",
+      reason: "paper-engine-tick must have a centralized closePosition() that emits EXIT_CLOSED Memory.",
+    });
+  }
+
+  // Check all close paths route through closePosition
+  const statusClosedPattern = /status:\s*["'`]CLOSED["'`]/g;
+  let match;
+  const closedWriteLines: number[] = [];
+  while ((match = statusClosedPattern.exec(content)) !== null) {
+    const lineNum = content.substring(0, match.index).split("\n").length;
+    closedWriteLines.push(lineNum);
+  }
+
+  // closePosition itself writes status: "CLOSED" — that's allowed.
+  // But any OTHER location writing status: "CLOSED" is a bypass.
+  // Simple heuristic: if there are more than 1 location, warn.
+  if (closedWriteLines.length > 1) {
+    // Find the closePosition method line range
+    const cpIdx = content.indexOf("closePosition(");
+    const cpLine = cpIdx >= 0 ? content.substring(0, cpIdx).split("\n").length : -1;
+    const outsideCp = closedWriteLines.filter(l => Math.abs(l - cpLine) > 60);
+    for (const badLine of outsideCp) {
+      violations.push({
+        file: tickPath, line: badLine,
+        content: lines[badLine - 1]?.trim().substring(0, 120) ?? "",
+        reason: `Direct status='CLOSED' write outside closePosition(). Route through closePosition() to ensure EXIT_CLOSED Memory fires.`,
+      });
+    }
+  }
+}
+
 // Check 5: memory_fanout.ts must not contain external fetches
 const fanoutPath = allFiles.find(f => normalize(f).includes("_shared/memory_fanout.ts"));
 if (fanoutPath) {
