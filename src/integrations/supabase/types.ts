@@ -277,6 +277,7 @@ export type Database = {
       }
       atlas_brain_log: {
         Row: {
+          cohort_id: string | null
           created_at: string
           id: string
           memory_event_ids: string[]
@@ -292,6 +293,7 @@ export type Database = {
           update_type: string
         }
         Insert: {
+          cohort_id?: string | null
           created_at?: string
           id?: string
           memory_event_ids?: string[]
@@ -307,6 +309,7 @@ export type Database = {
           update_type: string
         }
         Update: {
+          cohort_id?: string | null
           created_at?: string
           id?: string
           memory_event_ids?: string[]
@@ -352,6 +355,7 @@ export type Database = {
       }
       atlas_memory_events: {
         Row: {
+          cohort_id: string | null
           created_at: string
           decision_id: string | null
           id: string
@@ -365,6 +369,7 @@ export type Database = {
           ts: string
         }
         Insert: {
+          cohort_id?: string | null
           created_at?: string
           decision_id?: string | null
           id?: string
@@ -378,6 +383,7 @@ export type Database = {
           ts?: string
         }
         Update: {
+          cohort_id?: string | null
           created_at?: string
           decision_id?: string | null
           id?: string
@@ -2497,6 +2503,7 @@ export type Database = {
           agreement_score: number
           asset_id: string
           belief_p: number | null
+          cohort_id: string | null
           completeness_score: number
           confidence_explain: Json | null
           confidence_p: number | null
@@ -2534,6 +2541,7 @@ export type Database = {
           agreement_score?: number
           asset_id: string
           belief_p?: number | null
+          cohort_id?: string | null
           completeness_score?: number
           confidence_explain?: Json | null
           confidence_p?: number | null
@@ -2571,6 +2579,7 @@ export type Database = {
           agreement_score?: number
           asset_id?: string
           belief_p?: number | null
+          cohort_id?: string | null
           completeness_score?: number
           confidence_explain?: Json | null
           confidence_p?: number | null
@@ -2649,6 +2658,7 @@ export type Database = {
       }
       paper_fills: {
         Row: {
+          cohort_id: string | null
           fee_paid: number
           fill_price: number
           filled_qty: number
@@ -2660,6 +2670,7 @@ export type Database = {
           ts: string
         }
         Insert: {
+          cohort_id?: string | null
           fee_paid?: number
           fill_price: number
           filled_qty?: number
@@ -2671,6 +2682,7 @@ export type Database = {
           ts?: string
         }
         Update: {
+          cohort_id?: string | null
           fee_paid?: number
           fill_price?: number
           filled_qty?: number
@@ -2694,6 +2706,7 @@ export type Database = {
       paper_orders: {
         Row: {
           avg_fill_price: number | null
+          cohort_id: string | null
           created_at: string
           eligible_fill_at: string
           filled_qty: number
@@ -2717,6 +2730,7 @@ export type Database = {
         }
         Insert: {
           avg_fill_price?: number | null
+          cohort_id?: string | null
           created_at?: string
           eligible_fill_at?: string
           filled_qty?: number
@@ -2740,6 +2754,7 @@ export type Database = {
         }
         Update: {
           avg_fill_price?: number | null
+          cohort_id?: string | null
           created_at?: string
           eligible_fill_at?: string
           filled_qty?: number
@@ -2884,6 +2899,7 @@ export type Database = {
         Row: {
           close_reason: string | null
           closed_at: string | null
+          cohort_id: string | null
           created_at: string
           decision_id: string | null
           duplicate_key: string | null
@@ -2932,6 +2948,7 @@ export type Database = {
         Insert: {
           close_reason?: string | null
           closed_at?: string | null
+          cohort_id?: string | null
           created_at?: string
           decision_id?: string | null
           duplicate_key?: string | null
@@ -2980,6 +2997,7 @@ export type Database = {
         Update: {
           close_reason?: string | null
           closed_at?: string | null
+          cohort_id?: string | null
           created_at?: string
           decision_id?: string | null
           duplicate_key?: string | null
@@ -3600,6 +3618,7 @@ export type Database = {
           alpha: number
           avg_pnl_usd: number | null
           beta: number
+          cohort_id: string | null
           credibility: number
           ema_winrate: number | null
           expires: number | null
@@ -3619,6 +3638,7 @@ export type Database = {
           alpha?: number
           avg_pnl_usd?: number | null
           beta?: number
+          cohort_id?: string | null
           credibility?: number
           ema_winrate?: number | null
           expires?: number | null
@@ -3638,6 +3658,7 @@ export type Database = {
           alpha?: number
           avg_pnl_usd?: number | null
           beta?: number
+          cohort_id?: string | null
           credibility?: number
           ema_winrate?: number | null
           expires?: number | null
@@ -3721,6 +3742,7 @@ export type Database = {
       strategy_reputation: {
         Row: {
           blueprint_id: string
+          cohort_id: string | null
           confidence: number
           last_updated: string | null
           notes: string | null
@@ -3728,6 +3750,7 @@ export type Database = {
         }
         Insert: {
           blueprint_id: string
+          cohort_id?: string | null
           confidence?: number
           last_updated?: string | null
           notes?: string | null
@@ -3735,6 +3758,7 @@ export type Database = {
         }
         Update: {
           blueprint_id?: string
+          cohort_id?: string | null
           confidence?: number
           last_updated?: string | null
           notes?: string | null
