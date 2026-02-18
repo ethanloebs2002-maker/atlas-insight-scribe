@@ -13,7 +13,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const TF_SET = ["1m", "5m", "15m", "1h", "4h", "1d"];
 const MIN_TF_TRADES = 30;
-const MAX_EVALS_PER_TICK = 3;
+const MAX_EVALS_PER_TICK = 6;
 const EPSILON_INITIAL = 0.20;
 const EPSILON_FLOOR = 0.05;
 

@@ -294,7 +294,33 @@ async function emitDecision(
 
   // C) TRADE_CANDIDATE — with Scenario 1 consensus authority
   if (context.currentPrice && context.scenarios?.length > 0) {
-    const best = context.scenarios[0];
+    // ── Fix: select best by max probability, NOT array index ──────
+    const scenarios = context.scenarios;
+    const best = scenarios.reduce((acc: any, s: any) => {
+      const accProb = Number(acc?.probability ?? -1);
+      const sProb = Number(s?.probability ?? -1);
+      return sProb > accProb ? s : acc;
+    }, scenarios[0]);
+
+    // ── Sanity assert: detect if comparator ever disagrees with index-0 ──
+    const bull = scenarios.find((s: any) => s.type === "bullish");
+    const bear = scenarios.find((s: any) => s.type === "bearish");
+    if (bull && bear) {
+      const bullProb = Number(bull.probability ?? 0);
+      const bearProb = Number(bear.probability ?? 0);
+      if (bearProb > bullProb && best?.type !== "bearish") {
+        console.warn("[SCENARIOS][BUG] bearProb > bullProb but winner != bearish", {
+          bullProb, bearProb, winner: best?.type,
+        });
+      }
+    }
+
+    console.log("[SCENARIOS] emitDecision winner", {
+      symbol: assetId,
+      winner: { type: best?.type, probability: best?.probability },
+      all: scenarios.map((s: any) => ({ type: s.type, probability: s.probability })),
+    });
+
     const evidence = best.evidence || [];
     let direction = "NEUTRAL";
     if (best.type === "bullish") direction = "UP";
