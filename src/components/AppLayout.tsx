@@ -3,10 +3,11 @@ import { cn } from '@/lib/utils';
 import {
   Activity, Search, BarChart3, Anchor, FlaskConical,
   Newspaper, Brain, Globe, Dna, LogOut,
-  ChevronDown, PanelLeftClose, PanelLeft,
+  ChevronDown, PanelLeftClose, PanelLeft, Archive,
 } from 'lucide-react';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
 import PortfolioBar from '@/components/PortfolioBar';
+import CohortSelector from '@/components/CohortSelector';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -38,6 +39,7 @@ const navGroups: NavGroup[] = [
     pillar: 'memory',
     items: [
       { to: '/paper-trades', label: 'Trade Memory', icon: FlaskConical },
+      { to: '/archive', label: 'Archive', icon: Archive },
     ],
   },
   {
@@ -181,6 +183,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-xl">
           <div className="flex h-10 items-center px-4 gap-3">
             <SystemStatusBanner compact />
+            <div className="flex-1" />
+            <CohortSelector />
           </div>
           <div className="px-4 border-t border-border/50 py-1.5">
             <PortfolioBar />

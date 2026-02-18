@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
 import HelpTooltip from "@/components/HelpTooltip";
 import { usePaperStats } from "@/hooks/use-paper-engine";
+import { useCohortMetrics } from "@/hooks/use-cohort-metrics";
+import { useCohort } from "@/hooks/use-cohort";
 import { buildTradeVM } from "@/lib/build-trade-vm";
 import type { TradeVM } from "@/types/trade-vm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +54,8 @@ export default function PaperTrades() {
   const isMobile = useIsMobile();
 
   const sched = useAutoEvaluationScheduler(runAutoEvalTick, !paused && !!selectedAsset);
+  const { primary: cohortMetrics, secondary: legacyMetrics, isCompare } = useCohortMetrics(selectedAsset);
+  const cohort = useCohort();
   const { data: assetsRes } = useIncorporatedAssets();
   const incorporatedAssets = (assetsRes?.data || []) as { asset_id: string; symbol: string; is_enabled: boolean }[];
   const ASSETS = incorporatedAssets.length > 0
@@ -170,49 +174,72 @@ export default function PaperTrades() {
       </div>
 
       {/* ─── SUMMARY CARDS ──────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 px-4 pt-3">
-        <SummaryCard
-          label={decisions.length >= 200 ? "Decisions (Showing Last 200)" : "Total Decisions"}
-          value={decisions.length}
-          icon={<Target className="h-3 w-3" />}
-          tooltipId={decisions.length >= 200 ? "metric-total-decisions-capped" : "metric-total-decisions"}
-          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
-          window={decisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
-        />
-        <SummaryCard
-          label="Directional Accuracy"
-          value={`${dirAcc.toFixed(1)}%`}
-          icon={<TrendingUp className="h-3 w-3" />}
-          accent={dirAcc >= 65}
-          tooltipId="metric-directional-accuracy"
-          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
-          window={decisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
-        />
-        <SummaryCard
-          label="Average Risk-Adjusted Return"
-          value={avgR.toFixed(3)}
-          icon={<TrendingUp className="h-3 w-3" />}
-          accent={avgR > 0}
-          tooltipId="metric-avg-r"
-          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
-          window="Closed Trades"
-        />
-        <SummaryCard
-          label="Win Rate"
-          value={closedVMs.length > 0 ? `${((wins / closedVMs.length) * 100).toFixed(1)}%` : "—"}
-          icon={<CheckCircle2 className="h-3 w-3" />}
-          tooltipId="metric-win-rate"
-          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
-          window="Closed Trades"
-        />
-        <SummaryCard
-          label="Open / Pending"
-          value={`${openVMs.length} / ${pendingVMs.length}`}
-          icon={<Shield className="h-3 w-3" />}
-          tooltipId="metric-open-pending"
-          scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
-          window="Current"
-        />
+      <div className="px-4 pt-3">
+        {isCompare ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">Cohort Comparison</span>
+              <span className="text-[8px] font-mono text-muted-foreground/50">Compare mode affects metrics only; lists show selected cohort.</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <CompareCard label="Decisions" left={cohortMetrics.decisionsCount} right={legacyMetrics.decisionsCount} />
+              <CompareCard label="Directional Accuracy" left={`${cohortMetrics.dirAcc.toFixed(1)}%`} right={`${legacyMetrics.dirAcc.toFixed(1)}%`} />
+              <CompareCard label="Win Rate" left={`${cohortMetrics.winRate.toFixed(1)}%`} right={`${legacyMetrics.winRate.toFixed(1)}%`} />
+              <CompareCard label="Avg R" left={cohortMetrics.avgR.toFixed(3)} right={legacyMetrics.avgR.toFixed(3)} />
+              <CompareCard label="Open / Closed" left={`${cohortMetrics.openCount} / ${cohortMetrics.closedCount}`} right={`${legacyMetrics.openCount} / ${legacyMetrics.closedCount}`} />
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <SummaryCard
+              label={decisions.length >= 200 ? "Decisions (Showing Last 200)" : "Total Decisions"}
+              value={decisions.length}
+              icon={<Target className="h-3 w-3" />}
+              tooltipId={decisions.length >= 200 ? "metric-total-decisions-capped" : "metric-total-decisions"}
+              scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+              window={decisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
+              cohortLabel={cohort.label}
+            />
+            <SummaryCard
+              label="Directional Accuracy"
+              value={`${dirAcc.toFixed(1)}%`}
+              icon={<TrendingUp className="h-3 w-3" />}
+              accent={dirAcc >= 65}
+              tooltipId="metric-directional-accuracy"
+              scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+              window={decisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
+              cohortLabel={cohort.label}
+            />
+            <SummaryCard
+              label="Average Risk-Adjusted Return"
+              value={avgR.toFixed(3)}
+              icon={<TrendingUp className="h-3 w-3" />}
+              accent={avgR > 0}
+              tooltipId="metric-avg-r"
+              scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+              window="Closed Trades"
+              cohortLabel={cohort.label}
+            />
+            <SummaryCard
+              label="Win Rate"
+              value={closedVMs.length > 0 ? `${((wins / closedVMs.length) * 100).toFixed(1)}%` : "—"}
+              icon={<CheckCircle2 className="h-3 w-3" />}
+              tooltipId="metric-win-rate"
+              scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+              window="Closed Trades"
+              cohortLabel={cohort.label}
+            />
+            <SummaryCard
+              label="Open / Pending"
+              value={`${openVMs.length} / ${pendingVMs.length}`}
+              icon={<Shield className="h-3 w-3" />}
+              tooltipId="metric-open-pending"
+              scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
+              window="Current"
+              cohortLabel={cohort.label}
+            />
+          </div>
+        )}
       </div>
 
       {/* ─── MAIN CONTENT ───────────────────────────────────── */}
@@ -596,7 +623,7 @@ function FastFeedbackCard({ stats }: { stats: any }) {
 
 // ─── SUB-COMPONENTS ──────────────────────────────────────────────
 
-function SummaryCard({ label, value, icon, accent, tooltipId, scope, window: timeWindow }: {
+function SummaryCard({ label, value, icon, accent, tooltipId, scope, window: timeWindow, cohortLabel }: {
   label: string;
   value: string | number;
   icon: React.ReactNode;
@@ -604,6 +631,7 @@ function SummaryCard({ label, value, icon, accent, tooltipId, scope, window: tim
   tooltipId?: string;
   scope?: string;
   window?: string;
+  cohortLabel?: string;
 }) {
   return (
     <Card className="py-2 px-3">
@@ -613,12 +641,35 @@ function SummaryCard({ label, value, icon, accent, tooltipId, scope, window: tim
         {tooltipId && <HelpTooltip id={tooltipId} iconSize="h-2.5 w-2.5" />}
       </div>
       <div className={`text-base font-mono font-bold ${accent ? "text-primary" : ""}`}>{value}</div>
-      {(scope || timeWindow) && (
+      {(scope || timeWindow || cohortLabel) && (
         <div className="flex flex-wrap gap-1 mt-1">
+          {cohortLabel && <span className="text-[7px] font-mono text-pillar-memory/80 bg-pillar-memory/10 px-1 rounded">Cohort: {cohortLabel}</span>}
           {scope && <span className="text-[7px] font-mono text-muted-foreground/60 bg-secondary/50 px-1 rounded">{scope}</span>}
           {timeWindow && <span className="text-[7px] font-mono text-muted-foreground/60 bg-secondary/50 px-1 rounded">{timeWindow}</span>}
         </div>
       )}
+    </Card>
+  );
+}
+
+function CompareCard({ label, left, right }: {
+  label: string;
+  left: string | number;
+  right: string | number;
+}) {
+  return (
+    <Card className="py-2 px-3">
+      <div className="text-[9px] font-mono uppercase text-muted-foreground mb-1 truncate">{label}</div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <div className="text-[7px] font-mono text-pillar-brain/80 mb-0.5">Brain</div>
+          <div className="text-sm font-mono font-bold">{left}</div>
+        </div>
+        <div>
+          <div className="text-[7px] font-mono text-pillar-memory/80 mb-0.5">Legacy</div>
+          <div className="text-sm font-mono font-bold text-muted-foreground">{right}</div>
+        </div>
+      </div>
     </Card>
   );
 }
