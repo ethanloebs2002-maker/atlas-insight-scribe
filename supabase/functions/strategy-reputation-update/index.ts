@@ -1,10 +1,16 @@
 /**
- * ATLAS Strategy Reputation Update
- * Updates blueprint reputation based on closed paper_positions linked via strategy_blueprint_id.
- * BACKBONE SAFE — reads only from DB tables.
+ * ATLAS Strategy Reputation Update (BRAIN-COMPLIANT)
+ *
+ * Reads from atlas_memory_events (Memory pillar) — NOT from paper_positions.
+ * Logs all updates to atlas_brain_log for provenance.
+ *
+ * BACKBONE SAFE — no external fetches.
+ * MEMORY SAFE — reads only.
+ * BRAIN COMPLIANT — all learning flows from Memory.
  */
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { brainLog, readMemoryForPosition, readRecentClosedMemory, newBrainTraceId } from "../_shared/brain.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,76 +31,109 @@ serve(async (req) => {
   const sb = sbAdmin();
   const body = await req.json().catch(() => ({}));
   const positionId: string | null = body?.position_id ?? null;
+  const brainTrace = newBrainTraceId();
 
-  // Get closed positions linked to blueprints
-  let query = sb.from("paper_positions")
-    .select("id,symbol,strategy_blueprint_id,realized_pnl,realized_r,outcome,outcome_label,closed_at")
-    .not("closed_at", "is", null)
-    .not("strategy_blueprint_id", "is", null);
+  // ── Read from Memory (Brain's ONLY input) ─────────────────────────
+  let closedEvents: any[] = [];
 
   if (positionId) {
-    query = query.eq("id", positionId);
+    closedEvents = await readMemoryForPosition(positionId, sb);
+    closedEvents = closedEvents.filter(e => e.phase === "EXIT_CLOSED");
   } else {
-    query = query.order("closed_at", { ascending: false }).limit(100);
+    closedEvents = await readRecentClosedMemory(body?.limit ?? 100, sb);
   }
 
-  const { data: positions } = await query;
-  if (!positions?.length) {
-    return new Response(JSON.stringify({ ok: true, updated: 0, msg: "no linked positions" }), {
+  if (!closedEvents.length) {
+    return new Response(JSON.stringify({ ok: true, updated: 0, msg: "no closed memory events" }), {
       headers: { ...corsHeaders, "content-type": "application/json" },
     });
   }
 
-  // Group by blueprint_id
-  const byBlueprint = new Map<string, any[]>();
-  for (const p of positions) {
-    const bpId = p.strategy_blueprint_id;
-    if (!byBlueprint.has(bpId)) byBlueprint.set(bpId, []);
-    byBlueprint.get(bpId)!.push(p);
+  // Group by strategy_blueprint_id from Memory payload
+  const byBlueprint = new Map<string, { events: any[]; memIds: string[] }>();
+  for (const memEvent of closedEvents) {
+    const payload = memEvent.payload ?? {};
+    const bpId = payload.strategy_blueprint_id;
+    if (!bpId) continue;
+    if (!byBlueprint.has(bpId)) byBlueprint.set(bpId, { events: [], memIds: [] });
+    byBlueprint.get(bpId)!.events.push(memEvent);
+    byBlueprint.get(bpId)!.memIds.push(memEvent.id);
+  }
+
+  if (!byBlueprint.size) {
+    return new Response(JSON.stringify({ ok: true, updated: 0, msg: "no blueprint-linked memory events" }), {
+      headers: { ...corsHeaders, "content-type": "application/json" },
+    });
   }
 
   let updated = 0;
-  for (const [bpId, trades] of byBlueprint) {
-    // Get current reputation
+  const brainLogs: any[] = [];
+
+  for (const [bpId, { events, memIds }] of byBlueprint) {
     const { data: cur } = await sb.from("strategy_reputation")
       .select("*")
       .eq("blueprint_id", bpId)
       .maybeSingle();
 
-    const wins = trades.filter((t: any) => t.outcome === "TP" || t.outcome_label === "WIN" || Number(t.realized_pnl ?? 0) > 0).length;
-    const losses = trades.filter((t: any) => t.outcome === "SL" || t.outcome_label === "LOSS" || Number(t.realized_pnl ?? 0) < 0).length;
-    const total = trades.length;
+    const wins = events.filter((e: any) => {
+      const p = e.payload ?? {};
+      return p.outcome === "TP" || Number(p.realized_pnl ?? 0) > 0;
+    }).length;
+    const losses = events.filter((e: any) => {
+      const p = e.payload ?? {};
+      return p.outcome === "SL" || Number(p.realized_pnl ?? 0) < 0;
+    }).length;
+    const total = events.length;
     const winRate = total > 0 ? wins / total : 0;
 
-    const avgR = trades.reduce((s: number, t: any) => s + Number(t.realized_r ?? 0), 0) / Math.max(total, 1);
-    const maxDD = Math.min(...trades.map((t: any) => Number(t.realized_r ?? 0)));
+    const avgR = events.reduce((s: number, e: any) => s + Number(e.payload?.r_multiple ?? 0), 0) / Math.max(total, 1);
+    const maxDD = Math.min(...events.map((e: any) => Number(e.payload?.r_multiple ?? 0)));
 
-    // Compute new reputation
     const prevRep = Number(cur?.reputation ?? 0);
     const prevConf = Number(cur?.confidence ?? 0.2);
-    const prevSamples = Math.round(prevConf * 50); // approximate
-
+    const prevSamples = Math.round(prevConf * 50);
     const newSamples = prevSamples + total;
     const newConf = clamp(Math.log10(1 + newSamples) / 2, 0, 1);
 
-    // Reputation = weighted combo of win rate, expectancy, and drawdown penalty
     const expectancyScore = clamp(avgR * 10 + 0.5, 0, 1);
     const ddPenalty = maxDD < -3 ? 0.3 : maxDD < -2 ? 0.15 : 0;
     const rawRep = winRate * 0.4 + expectancyScore * 0.4 + (1 - ddPenalty) * 0.2;
-    const newRep = prevRep * 0.7 + rawRep * 0.3; // EMA blend
+    const newRep = prevRep * 0.7 + rawRep * 0.3;
+
+    const posterior = {
+      reputation: clamp(newRep, 0, 1),
+      confidence: newConf,
+    };
 
     await sb.from("strategy_reputation").upsert({
       blueprint_id: bpId,
-      reputation: clamp(newRep, 0, 1),
-      confidence: newConf,
+      ...posterior,
       last_updated: new Date().toISOString(),
       notes: JSON.stringify({ wins, losses, total, avgR: avgR.toFixed(4), winRate: winRate.toFixed(3) }),
     }, { onConflict: "blueprint_id" });
 
+    brainLogs.push({
+      trace_id: brainTrace,
+      target_table: "strategy_reputation",
+      target_key: bpId,
+      symbol: events[0]?.symbol,
+      update_type: "REPUTATION_BLEND",
+      prior_state: { reputation: prevRep, confidence: prevConf },
+      posterior_state: posterior,
+      memory_event_ids: memIds,
+      source_function: "strategy-reputation-update",
+      notes: `wins=${wins} losses=${losses} avgR=${avgR.toFixed(4)}`,
+    });
+
     updated++;
   }
 
-  return new Response(JSON.stringify({ ok: true, updated }), {
+  // Log all brain updates
+  if (brainLogs.length) {
+    await brainLog(brainLogs, sb);
+  }
+
+  return new Response(JSON.stringify({ ok: true, updated, brain_trace: brainTrace }), {
     headers: { ...corsHeaders, "content-type": "application/json" },
   });
 });
