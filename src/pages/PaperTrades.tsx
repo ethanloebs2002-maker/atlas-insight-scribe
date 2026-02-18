@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import HelpTooltip from "@/components/HelpTooltip";
 import { usePaperStats } from "@/hooks/use-paper-engine";
-import { useCohort, COHORTS } from "@/hooks/use-cohort";
+import { useCohort } from "@/hooks/use-cohort";
+import { applyLegacyGate } from "@/lib/cohortFilter";
 import { buildTradeVM } from "@/lib/build-trade-vm";
 import type { TradeVM } from "@/types/trade-vm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,11 +43,7 @@ import { type EvalCadence, CADENCE_OPTIONS } from "@/lib/eval-cadence";
 import { useAutoEvaluationScheduler } from "@/hooks/use-auto-eval-scheduler";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-// ─── COHORT FILTER HELPER ──────────────────────────────────────
-function filterByCohort<T extends { cohort_id?: string | null }>(rows: T[], cohortId: string | null): T[] {
-  if (!cohortId) return rows;
-  return rows.filter(r => r.cohort_id === cohortId);
-}
+// (filterByCohort removed — replaced by applyLegacyGate)
 
 
 export default function PaperTrades() {
@@ -105,15 +102,15 @@ export default function PaperTrades() {
   const selectedVM = useMemo(() => allVMs.find(vm => vm.id === selectedVmId) ?? null, [allVMs, selectedVmId]);
 
   // ─── COHORT-AWARE METRICS (robust: uses positions/decisions arrays directly) ──
-  const metricsDecisions = useMemo(() => {
-    if (cohort.legacyUnlocked && cohort.includeLegacy) return decisions;
-    return decisions.filter((d: any) => d.cohort_id === COHORTS.brain);
-  }, [decisions, cohort.includeLegacy, cohort.legacyUnlocked]);
+  const metricsDecisions = useMemo(
+    () => applyLegacyGate(decisions, cohort.includeLegacy),
+    [decisions, cohort.includeLegacy],
+  );
 
-  const metricsTrades = useMemo(() => {
-    if (cohort.legacyUnlocked && cohort.includeLegacy) return trades;
-    return trades.filter((t: any) => t.cohort_id === COHORTS.brain);
-  }, [trades, cohort.includeLegacy, cohort.legacyUnlocked]);
+  const metricsTrades = useMemo(
+    () => applyLegacyGate(trades, cohort.includeLegacy),
+    [trades, cohort.includeLegacy],
+  );
 
   // Position-based metrics (avoids fragile VM→position map joins)
   const metricsClosedPositions = useMemo(
