@@ -145,7 +145,9 @@ async function getExposure(): Promise<{
   // Non-legacy OPEN (exclude legacy_oversized and test trades)
   const openNonLegacy = openAll.filter((p: any) => {
     const m = p.meta as any;
-    return m?.legacy_oversized !== true && m?.is_test_trade !== true;
+    const legacy = m?.legacy_oversized === true || m?.legacy_oversized === "true";
+    const test = m?.is_test_trade === true || m?.is_test_trade === "true";
+    return !legacy && !test;
   });
 
   // Sum per-trade risk_usd for non-legacy OPEN positions
@@ -385,7 +387,8 @@ async function emitDecision(
 
       await emitEvent(runId, "DECISION", decision.data?.id, "DECISION_EMITTED", { type: "TRADE_CANDIDATE", direction, probability, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
 
-      // ── Memory: DECISION_EMIT (full fan-out) ──
+      // ── Memory: DECISION_EMIT (full fan-out) — build deferred fanout ──
+      let deferredFanout: { traceId: string; common: any; sources: SourceEvent[] } | null = null;
       if (decision.data?.id) {
         const decTraceId = newTraceId();
         const decCommon = { decision_id: decision.data.id, symbol: assetId, timeframe };
@@ -438,9 +441,7 @@ async function emitDecision(
         // Policy source deferred until after gate (to avoid duplicate policy reads)
         decSources.push({ source: "policy", status: "MISSING", reason: "deferred until gate" });
 
-        // NOTE: memoryFanOut is deferred until AFTER the authoritative gate
-        // so we can inject the real decision contract. See below.
-        const deferredFanout = { traceId: decTraceId, common: decCommon, sources: decSources };
+        deferredFanout = { traceId: decTraceId, common: decCommon, sources: decSources };
       }
 
       // ── Hook A: Context snapshots on decision emission ──
@@ -555,8 +556,7 @@ async function emitDecision(
         }
 
         // ── Inject authoritative Decision Output Contract ──
-        if (!deferredFanout) throw new Error("[memory] deferredFanout missing — cannot emit decision contract");
-        {
+        if (deferredFanout) {
           const gateApproved = rejectionReasons.length === 0;
           const gateAction = gateApproved
             ? (direction === "UP" ? "ENTER_LONG" : "ENTER_SHORT")
@@ -855,11 +855,12 @@ async function processExecution(assetId: string) {
     const effectivePrice = isLong ? currentPrice + slippage : currentPrice - slippage;
     const fee = effectivePrice * feeBps / 10000;
 
+    const posQty = Number(pos.qty) || 1;
     await supabase.from("paper_fills").insert({
-      order_id: entryOrder.id, position_id: pos.id, filled_qty: 1,
+      order_id: entryOrder.id, position_id: pos.id, filled_qty: posQty,
       fill_price: effectivePrice, fee_paid: fee, slippage_paid: slippage,
     });
-    await supabase.from("paper_orders").update({ status: "FILLED", filled_qty: 1, avg_fill_price: effectivePrice }).eq("id", entryOrder.id);
+    await supabase.from("paper_orders").update({ status: "FILLED", filled_qty: posQty, avg_fill_price: effectivePrice }).eq("id", entryOrder.id);
 
     // eligible_close_at = next candle boundary (no same-candle close)
     const tfMs = TF_MS[pos.timeframe] || TF_MS["4h"];
@@ -869,12 +870,12 @@ async function processExecution(assetId: string) {
     const ocoGroupId = crypto.randomUUID();
     const { data: tpOrder } = await supabase.from("paper_orders").insert({
       run_id: pos.run_id, policy_id: pos.policy_id, symbol: pos.symbol, side: pos.side,
-      order_type: "TAKE_PROFIT", qty: 1, limit_price: pos.tp_price, status: "NEW",
+      order_type: "TAKE_PROFIT", qty: posQty, limit_price: pos.tp_price, status: "NEW",
       oco_group_id: ocoGroupId, reduce_only: true, position_id: pos.id,
     }).select().single();
     const { data: slOrder } = await supabase.from("paper_orders").insert({
       run_id: pos.run_id, policy_id: pos.policy_id, symbol: pos.symbol, side: pos.side,
-      order_type: "STOP_LOSS", qty: 1, stop_price: pos.stop_price, status: "NEW",
+      order_type: "STOP_LOSS", qty: posQty, stop_price: pos.stop_price, status: "NEW",
       oco_group_id: ocoGroupId, reduce_only: true, position_id: pos.id,
     }).select().single();
 
@@ -956,11 +957,12 @@ async function processExecution(assetId: string) {
     // Create exit fill for the triggered order
     const exitOrderId = closeReason === "TP" ? pos.tp_order_id : closeReason === "SL" ? pos.sl_order_id : null;
     if (exitOrderId) {
+      const exitQty = Number(pos.qty) || 1;
       await supabase.from("paper_fills").insert({
-        order_id: exitOrderId, position_id: pos.id, filled_qty: 1,
+        order_id: exitOrderId, position_id: pos.id, filled_qty: exitQty,
         fill_price: effectiveExit, fee_paid: exitFee, slippage_paid: exitSlippage,
       });
-      await supabase.from("paper_orders").update({ status: "FILLED", filled_qty: 1, avg_fill_price: effectiveExit }).eq("id", exitOrderId);
+      await supabase.from("paper_orders").update({ status: "FILLED", filled_qty: exitQty, avg_fill_price: effectiveExit }).eq("id", exitOrderId);
     }
 
     // Cancel OCO counterpart
