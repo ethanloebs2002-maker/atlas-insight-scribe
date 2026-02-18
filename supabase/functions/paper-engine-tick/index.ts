@@ -10,6 +10,8 @@ import { defaultMaxHoldMs } from "../_shared/closedloop.ts";
 import { newTraceId } from "../_shared/memory.ts";
 import { memoryFanOut, type SourceEvent } from "../_shared/memory_fanout.ts";
 
+const DEPLOY_MARK = "paper-engine-tick:fanout-probe:v2026-02-18a";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -553,9 +555,15 @@ class PaperEngineCore {
 
       // whale, news, strategy auto-fill as MISSING via fan-out
 
+      console.log("[MEMORY_PROBE]", DEPLOY_MARK, "ENTRY_FILLED about to fanout", {
+        position_id: posId, decision_id: pos.decision_id ?? null, cohort_id: pos.cohort_id ?? null,
+      });
       try {
-        await memoryFanOut(this.sb, "ENTRY_FILLED", traceId, fillCommon, fillSources);
-      } catch (e) { console.warn("[memory] ENTRY_FILLED fan-out failed:", (e as any).message); }
+        const fanResult = await memoryFanOut(this.sb, "ENTRY_FILLED", traceId, fillCommon, fillSources);
+        console.log("[MEMORY_PROBE]", DEPLOY_MARK, "ENTRY_FILLED fanout OK", { position_id: posId, result: fanResult });
+      } catch (e: any) {
+        console.error("[MEMORY_PROBE]", DEPLOY_MARK, "ENTRY_FILLED fanout FAILED", e);
+      }
     }
 
     if (entryComplete) {
@@ -865,9 +873,15 @@ class PaperEngineCore {
 
     // whale, news, strategy auto-fill as MISSING via fan-out
 
+    console.log("[MEMORY_PROBE]", DEPLOY_MARK, "EXIT_CLOSED about to fanout", {
+      position_id: posId, decision_id: pos.decision_id ?? null, cohort_id: pos.cohort_id ?? null, outcome,
+    });
     try {
-      await memoryFanOut(this.sb, "EXIT_CLOSED", exitTraceId, exitCommon, exitSources);
-    } catch (e) { console.warn("[memory] EXIT_CLOSED fan-out failed:", (e as any).message); }
+      const fanResult = await memoryFanOut(this.sb, "EXIT_CLOSED", exitTraceId, exitCommon, exitSources);
+      console.log("[MEMORY_PROBE]", DEPLOY_MARK, "EXIT_CLOSED fanout OK", { position_id: posId, result: fanResult });
+    } catch (e: any) {
+      console.error("[MEMORY_PROBE]", DEPLOY_MARK, "EXIT_CLOSED fanout FAILED", e);
+    }
 
     // ── Risk Lab: update performance on close ──
     if (pos.risk_profile_key) {
@@ -1242,6 +1256,7 @@ serve(async (req) => {
   const headers = { ...corsHeaders, "Content-Type": "application/json" };
 
   try {
+    console.log("[DEPLOY]", DEPLOY_MARK);
     const sb = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,

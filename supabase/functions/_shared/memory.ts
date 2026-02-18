@@ -85,16 +85,18 @@ export async function memoryWrite(
     payload: e.payload,
   }));
 
+  console.log("[MEMORY_WRITE]", arr[0]?.phase, "writing", rows.length, "rows", { trace_id: arr[0]?.trace_id });
   const { data, error } = await client
     .from("atlas_memory_events")
     .insert(rows)
     .select("id");
 
   if (error) {
-    console.error("[memory] Insert failed:", error.message);
+    console.error("[MEMORY_WRITE]", arr[0]?.phase, "INSERT FAILED", error);
     return { ok: false, error: error.message };
   }
 
+  console.log("[MEMORY_WRITE]", arr[0]?.phase, "INSERT OK", { inserted: data?.length ?? 0 });
   return { ok: true, ids: (data ?? []).map((r: any) => r.id) };
 }
 
