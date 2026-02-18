@@ -366,31 +366,6 @@ async function emitDecision(
           if (s.contributed_confidence != null) scenarioWeights[s.scenario_key] = s.contributed_confidence;
         }
 
-        // ── Pre-compute decision verdict for Memory contract ──
-        const prePolicy = await getActivePolicy();
-        const preExposure = await getExposure();
-        const preSide = direction === "UP" ? "LONG" : "SHORT";
-        const preStopLevel = stopLoss.level;
-        const preTpLevel = targets[targets.length - 1]?.price;
-        const preRiskDist = Math.abs(((entryZone.priceRange[0] + entryZone.priceRange[1]) / 2) - preStopLevel);
-        const preRewardDist = Math.abs(preTpLevel - ((entryZone.priceRange[0] + entryZone.priceRange[1]) / 2));
-        const preRR = preRiskDist > 0 ? preRewardDist / preRiskDist : 0;
-        const preEV = policyProbability * preRR - (1 - policyProbability);
-
-        const decisionReasons: string[] = [];
-        if (prePolicy) {
-          if (policyProbability < (prePolicy.min_prob || 0.35)) decisionReasons.push(`PROB_TOO_LOW`);
-          if (!prePolicy.allow_shorts && preSide === "SHORT") decisionReasons.push(`SHORTS_DISABLED`);
-          if (preExposure.open >= (prePolicy.max_open || 10)) decisionReasons.push(`MAX_OPEN`);
-          if (preExposure.pending >= (prePolicy.max_pending || 20)) decisionReasons.push(`MAX_PENDING`);
-          if (preRR < (prePolicy.min_rr || 1.2)) decisionReasons.push(`RR_TOO_LOW`);
-          if (prePolicy.require_ev_positive && preEV <= 0) decisionReasons.push(`EV_NEGATIVE`);
-        }
-        const decisionApproved = decisionReasons.length === 0;
-        const decisionAction = decisionApproved
-          ? (direction === "UP" ? "ENTER_LONG" : "ENTER_SHORT")
-          : "NO_TRADE";
-
         const decSources: SourceEvent[] = [
           { source: "consensus", status: "OK", data: {
             direction, probability, policyProbability,
@@ -404,20 +379,8 @@ async function emitDecision(
             scenario_keys: scenarioKeys,
             scenario_weights: scenarioWeights,
             regime: best.regime || null,
-            // Deterministic blueprint ID for strategy learning
             strategy_blueprint_id: `baseline_v1:${best.type ?? "neutral"}:${(best.regime ?? "na").toLowerCase()}:${timeframe}:${direction}`,
-            // ── Decision Output Contract ──
-            decision: {
-              approved: decisionApproved,
-              action: decisionAction,
-              reasons: decisionReasons,
-              thresholds: {
-                minPolicyProbability: prePolicy?.min_prob ?? 0.35,
-                minConsensusScore: prePolicy?.min_consensus ?? null,
-                minRR: prePolicy?.min_rr ?? 1.2,
-                evPositiveRequired: prePolicy?.require_ev_positive ?? false,
-              },
-            },
+            // decision field will be injected after the authoritative gate below
           }},
           { source: "execution", status: "MISSING", reason: "not executed yet" },
         ];
@@ -439,18 +402,20 @@ async function emitDecision(
           else decSources.push({ source: "derivatives", status: "MISSING", reason: "no derivatives snapshot" });
         } catch { decSources.push({ source: "derivatives", status: "FAILED", reason: "derivatives read failed" }); }
 
-        // Policy
+        // Policy source (for fan-out; actual policy loaded below for gating)
         try {
           const pol = await getActivePolicy();
           if (pol) decSources.push({ source: "policy", status: "OK", data: { version_tag: pol.version_tag, min_prob: pol.min_prob, min_rr: pol.min_rr } });
           else decSources.push({ source: "policy", status: "MISSING", reason: "no active policy" });
         } catch { decSources.push({ source: "policy", status: "FAILED", reason: "policy read failed" }); }
 
-        // Whale, news, risk_lab, strategy — may not have data at decision time
-        // These will auto-fill as MISSING by the fan-out helper
+        // NOTE: memoryFanOut is deferred until AFTER the authoritative gate
+        // so we can inject the real decision contract. See below.
 
-        memoryFanOut(supabase, "DECISION_EMIT", decTraceId, decCommon, decSources)
-          .catch(e => console.warn("[memory] DECISION_EMIT fan-out failed:", e.message));
+        // Store references for deferred fan-out
+        var _decTraceId = decTraceId;
+        var _decCommon = decCommon;
+        var _decSources = decSources;
       }
 
       // ── Hook A: Context snapshots on decision emission ──
@@ -531,6 +496,37 @@ async function emitDecision(
             const ev = policyProbability * rr - (1 - policyProbability);
             if (ev <= 0) rejectionReasons.push(`EV ${ev.toFixed(3)} <= 0 (policy_prob=${policyProbability.toFixed(3)}, rr=${rr.toFixed(2)})`);
           }
+        }
+
+        // ── Inject authoritative Decision Output Contract into consensus source ──
+        const gateApproved = rejectionReasons.length === 0;
+        const gateAction = gateApproved
+          ? (direction === "UP" ? "ENTER_LONG" : "ENTER_SHORT")
+          : "NO_TRADE";
+        if (_decSources) {
+          const consensusSrc = _decSources.find((s: SourceEvent) => s.source === "consensus");
+          if (consensusSrc) {
+            (consensusSrc as any).data.decision = {
+              approved: gateApproved,
+              action: gateAction,
+              reasons: rejectionReasons.map(r =>
+                r.startsWith("policy_prob") ? "PROB_TOO_LOW" :
+                r.startsWith("shorts disabled") ? "SHORTS_DISABLED" :
+                r.startsWith("max_open") ? "MAX_OPEN" :
+                r.startsWith("max_pending") ? "MAX_PENDING" :
+                r.startsWith("R:R") ? "RR_TOO_LOW" :
+                r.startsWith("EV") ? "EV_NEGATIVE" :
+                r.startsWith("NO_MARKET") ? "NO_MARKET_CONTEXT" : r
+              ),
+              thresholds: {
+                minPolicyProbability: policy?.min_prob ?? 0.35,
+                minRR: policy?.min_rr ?? 1.2,
+                evPositiveRequired: policy?.require_ev_positive ?? false,
+              },
+            };
+          }
+          memoryFanOut(supabase, "DECISION_EMIT", _decTraceId, _decCommon, _decSources)
+            .catch((e: Error) => console.warn("[memory] DECISION_EMIT fan-out failed:", e.message));
         }
 
         if (rejectionReasons.length > 0) {
