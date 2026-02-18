@@ -58,6 +58,11 @@
     --sidebar-border: 220 15% 18%;
     --sidebar-ring: 175 80% 50%;
 
+    /* Pillar accent tokens */
+    --pillar-backbone: 210 80% 55%;
+    --pillar-memory: 270 60% 60%;
+    --pillar-brain: 150 70% 50%;
+
     --font-mono: 'JetBrains Mono', monospace;
     --font-sans: 'Space Grotesk', system-ui, sans-serif;
   }
