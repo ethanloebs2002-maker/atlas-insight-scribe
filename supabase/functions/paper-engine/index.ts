@@ -18,6 +18,11 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const VERSION_TAG = "v2.0.0";
 
+// ─── RISK CAP CONSTANTS ─────────────────────────────────────────
+const VIRTUAL_EQUITY_USD = 100_000;
+const MAX_RISK_PER_TRADE_PCT = 0.0075;  // 0.75%
+const MAX_PORTFOLIO_RISK_PCT = 0.04;    // 4.0%
+
 // ─── HORIZON ROUTER ──────────────────────────────────────────────
 type HorizonTF = "15m" | "30m" | "1h" | "4h" | "1d";
 type Horizon = "4h" | "6h" | "12h" | "24h" | "72h";
@@ -125,12 +130,40 @@ function getExpiryMinutes(policy: any, timeframe: string): number {
   return map[timeframe] || 4320;
 }
 
-async function getExposure(): Promise<{ open: number; pending: number }> {
-  const { data } = await supabase.from("paper_positions").select("status").in("status", ["OPEN", "PENDING_ENTRY"]);
+async function getExposure(): Promise<{
+  open: number; pending: number;
+  openNonLegacy: number;
+  portfolioRiskUsd: number;
+}> {
+  const { data } = await supabase.from("paper_positions")
+    .select("status, entry_price, stop_price, qty, meta")
+    .in("status", ["OPEN", "PENDING_ENTRY"]);
   const items = data || [];
+  const openAll = items.filter((p: any) => p.status === "OPEN");
+  const pending = items.filter((p: any) => p.status === "PENDING_ENTRY");
+
+  // Non-legacy OPEN (exclude legacy_oversized and test trades)
+  const openNonLegacy = openAll.filter((p: any) => {
+    const m = p.meta as any;
+    return m?.legacy_oversized !== true && m?.is_test_trade !== true;
+  });
+
+  // Sum per-trade risk_usd for non-legacy OPEN positions
+  let portfolioRiskUsd = 0;
+  for (const p of openNonLegacy) {
+    const entry = Number(p.entry_price ?? 0);
+    const stop = Number(p.stop_price ?? 0);
+    const qty = Number(p.qty ?? 1);
+    if (entry > 0 && stop > 0) {
+      portfolioRiskUsd += qty * Math.abs(entry - stop);
+    }
+  }
+
   return {
-    open: items.filter((p: any) => p.status === "OPEN").length,
-    pending: items.filter((p: any) => p.status === "PENDING_ENTRY").length,
+    open: openAll.length,
+    pending: pending.length,
+    openNonLegacy: openNonLegacy.length,
+    portfolioRiskUsd,
   };
 }
 
@@ -471,20 +504,44 @@ async function emitDecision(
 
         let gateRR: number | null = null;
         let gateEV: number | null = null;
-        let gateExposure: { open: number; pending: number } | null = null;
+        let gateExposure: { open: number; pending: number; openNonLegacy: number; portfolioRiskUsd: number } | null = null;
+        let riskClampedQty: number | null = null;
 
         if (policy) {
           if (policyProbability < (policy.min_prob || 0.35)) rejectionReasons.push(`policy_prob ${policyProbability.toFixed(3)} < min_prob ${policy.min_prob}`);
           if (!policy.allow_shorts && side === "SHORT") rejectionReasons.push("shorts disabled by policy");
           const exposure = await getExposure();
           gateExposure = exposure;
-          if (exposure.open >= (policy.max_open || 10)) rejectionReasons.push(`max_open reached: ${exposure.open}`);
-          if (exposure.pending >= (policy.max_pending || 20)) rejectionReasons.push(`max_pending reached: ${exposure.pending}`);
 
+          // Portfolio risk gate (replaces MAX_OPEN deadlock)
           const stopLevel = stopLoss.level;
           const tpLevel = targets[targets.length - 1]?.price;
           const riskDist = Math.abs(entryPrice - stopLevel);
           const rewardDist = Math.abs(tpLevel - entryPrice);
+
+          if (riskDist <= 0) {
+            rejectionReasons.push("STOP_DISTANCE_INVALID");
+          } else {
+            // Per-trade risk cap → clamp qty
+            const riskCapUsd = VIRTUAL_EQUITY_USD * MAX_RISK_PER_TRADE_PCT;
+            const maxQtyByRisk = riskCapUsd / riskDist;
+            riskClampedQty = Math.min(1, maxQtyByRisk); // default qty=1, clamp down
+            if (riskClampedQty <= 0.0001) {
+              rejectionReasons.push("RISK_CAP_CLAMPED_TO_ZERO");
+            }
+
+            // Portfolio risk gate
+            const newTradeRiskUsd = riskClampedQty * riskDist;
+            const portfolioRiskCap = VIRTUAL_EQUITY_USD * MAX_PORTFOLIO_RISK_PCT;
+            if (exposure.portfolioRiskUsd + newTradeRiskUsd > portfolioRiskCap) {
+              rejectionReasons.push(`PORTFOLIO_RISK_CAP (current=${exposure.portfolioRiskUsd.toFixed(0)}, new=${newTradeRiskUsd.toFixed(0)}, cap=${portfolioRiskCap.toFixed(0)})`);
+            }
+          }
+
+          // Safety max_open (generous fallback, not the primary gate)
+          if (exposure.openNonLegacy >= (policy.max_open || 10)) rejectionReasons.push(`max_open reached: ${exposure.openNonLegacy} (non-legacy)`);
+          if (exposure.pending >= (policy.max_pending || 20)) rejectionReasons.push(`max_pending reached: ${exposure.pending}`);
+
           const rr = riskDist > 0 ? rewardDist / riskDist : 0;
           gateRR = rr;
           if (rr < (policy.min_rr || 1.2)) rejectionReasons.push(`R:R ${rr.toFixed(2)} < min_rr ${policy.min_rr}`);
@@ -498,6 +555,7 @@ async function emitDecision(
         }
 
         // ── Inject authoritative Decision Output Contract ──
+        if (!deferredFanout) throw new Error("[memory] deferredFanout missing — cannot emit decision contract");
         {
           const gateApproved = rejectionReasons.length === 0;
           const gateAction = gateApproved
@@ -524,7 +582,13 @@ async function emitDecision(
                 rr: gateRR,
                 ev: gateEV,
                 exposure_open: gateExposure?.open ?? null,
+                exposure_open_nonlegacy: gateExposure?.openNonLegacy ?? null,
                 exposure_pending: gateExposure?.pending ?? null,
+                portfolio_risk_usd: gateExposure?.portfolioRiskUsd ?? null,
+                risk_clamped_qty: riskClampedQty,
+                virtual_equity: VIRTUAL_EQUITY_USD,
+                max_risk_per_trade_pct: MAX_RISK_PER_TRADE_PCT,
+                max_portfolio_risk_pct: MAX_PORTFOLIO_RISK_PCT,
               },
             };
           }
@@ -542,6 +606,7 @@ async function emitDecision(
               };
               delete (policySrc as any).reason;
             } else {
+              policySrc.status = "MISSING";
               (policySrc as any).reason = "no active policy";
             }
           }
@@ -589,9 +654,9 @@ async function emitDecision(
           // originalMult is ~1.0 (the engine's organic stop); we create variants around it
           const baseAtr = riskDist > 0 ? riskDist : entryPrice * 0.025;
 
-          // Determine how many siblings we can create given exposure
-          const exposure = await getExposure();
-          const remainingOpen = (policy?.max_open || 10) - exposure.open;
+          // Determine how many siblings we can create given exposure (use already-loaded gateExposure)
+          const exposure = gateExposure ?? await getExposure();
+          const remainingOpen = (policy?.max_open || 10) - exposure.openNonLegacy;
           const remainingPending = (policy?.max_pending || 20) - exposure.pending;
           const slotsAvailable = Math.min(remainingOpen, remainingPending);
 
@@ -650,7 +715,7 @@ async function emitDecision(
 
             const { data: position } = await supabase.from("paper_positions").insert({
               run_id: runId, policy_id: policy?.id, decision_id: decision.data.id,
-              symbol: assetId, side, timeframe, horizon, status: "PENDING_ENTRY", qty: 1,
+              symbol: assetId, side, timeframe, horizon, status: "PENDING_ENTRY", qty: riskClampedQty ?? 1,
               stop_price: rv.stopPrice, tp_price: tpLevel,
               initial_probability_pred: policyProbability, initial_probability_source: isFallback ? "consensus_authority" : "indicator-engine",
               regime_label: best.regime || "Unknown", duplicate_key: vi === 0 ? duplicateKey : `${duplicateKey}:${rv.key}`,
@@ -672,7 +737,7 @@ async function emitDecision(
           if (position) {
             const { data: entryOrder } = await supabase.from("paper_orders").insert({
               run_id: runId, policy_id: policy?.id, symbol: assetId, side,
-              order_type: "LIMIT", qty: 1, limit_price: limitPrice, status: "NEW",
+              order_type: "LIMIT", qty: riskClampedQty ?? 1, limit_price: limitPrice, status: "NEW",
               eligible_fill_at: new Date(Date.now() + latencyMs).toISOString(),
               position_id: position.id, meta: { decision_id: decision.data.id, entry_order: true },
             }).select().single();
