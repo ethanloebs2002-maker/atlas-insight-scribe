@@ -4,7 +4,8 @@
  * Detects writes to atlas_memory_events from non-approved modules,
  * detects new ad-hoc event tables that bypass Memory,
  * validates source participation contract,
- * and ensures memory_fanout.ts contains no external fetches.
+ * ensures memory_fanout.ts contains no external fetches,
+ * and ensures memory_fanout.ts reads from atlas_memory_sources (not hardcoded).
  *
  * Usage: npx tsx scripts/memory_guard.ts
  *
@@ -43,12 +44,6 @@ const UI_INSERT_WHITELIST = [
   "admin_messages",
   "profiles",
   "user_roles",
-];
-
-// ── All 10 registered sources (must match atlas_memory_sources) ──────
-const REQUIRED_SOURCES = [
-  "consensus", "market", "orderbook", "derivatives",
-  "execution", "risk_lab", "policy", "whale", "news", "strategy",
 ];
 
 // ── External fetch patterns (forbidden in memory_fanout.ts) ──────────
@@ -179,7 +174,7 @@ for (const relPath of CHOKE_POINT_FILES) {
     violations.push({
       file: relPath, line: 0,
       content: "Uses memoryWrite() directly instead of memoryFanOut()",
-      reason: `Choke-point file must use memoryFanOut() for full source coverage. All ${REQUIRED_SOURCES.length} sources must report at each phase.`,
+      reason: `Choke-point file must use memoryFanOut() for full source coverage.`,
     });
   }
 }
@@ -189,9 +184,10 @@ const fanoutPath = allFiles.find(f => normalize(f).includes("_shared/memory_fano
 if (fanoutPath) {
   const content = fs.readFileSync(fanoutPath, "utf-8");
   const lines = content.split("\n");
+
+  // Check 5a: No external fetches
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // Skip comments
     if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
     for (const pattern of EXTERNAL_FETCH_PATTERNS) {
       if (pattern.test(line)) {
@@ -202,6 +198,28 @@ if (fanoutPath) {
         });
       }
     }
+  }
+
+  // Check 5b: Must read from atlas_memory_sources (anti-drift)
+  const hasDbRead = content.includes('.from("atlas_memory_sources")') ||
+                    content.includes(".from('atlas_memory_sources')") ||
+                    content.includes(".from(`atlas_memory_sources`)");
+  if (!hasDbRead) {
+    violations.push({
+      file: fanoutPath, line: 0,
+      content: "No DB read from atlas_memory_sources found",
+      reason: "Memory fan-out MUST load source list from atlas_memory_sources at runtime, not from hardcoded constants. This prevents drift.",
+    });
+  }
+
+  // Check 5c: Must NOT have hardcoded ALL_SOURCES or REQUIRED_SOURCES as emission list
+  const hardcodedListPattern = /(?:const|let|var)\s+(?:ALL_SOURCES|REQUIRED_SOURCES)\s*=\s*\[/;
+  if (hardcodedListPattern.test(content)) {
+    violations.push({
+      file: fanoutPath, line: 0,
+      content: "Hardcoded ALL_SOURCES or REQUIRED_SOURCES found",
+      reason: "Memory fan-out MUST NOT use hardcoded source lists as the emission source-of-truth. Use atlas_memory_sources DB table.",
+    });
   }
 }
 
@@ -219,8 +237,9 @@ if (violations.length > 0) {
   process.exit(1);
 } else {
   console.log("✅ Memory Guard passed — no violations found.");
-  console.log(`   ✓ Source participation contract: ${REQUIRED_SOURCES.length} sources required at each choke point`);
   console.log(`   ✓ Fan-out enforcement: choke-point files use memoryFanOut()`);
   console.log(`   ✓ Backbone isolation: memory_fanout.ts contains no external fetches`);
+  console.log(`   ✓ Anti-drift: memory_fanout.ts reads from atlas_memory_sources DB table`);
+  console.log(`   ✓ No hardcoded source lists in fan-out`);
   process.exit(0);
 }

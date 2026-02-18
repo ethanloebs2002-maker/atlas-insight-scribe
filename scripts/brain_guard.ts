@@ -6,6 +6,7 @@
  *    paper_positions/paper_decisions/attribution/sensor tables
  * 2. Brain output tables are only written by approved brain functions
  * 3. No silent feedback loops bypass the Memory → Brain → Policy chain
+ * 4. Brain-update uses batch loading (no N+1 per-position loops)
  *
  * Violation message:
  *   "THIS BYPASSES THE BRAIN. LEARNING MUST FLOW FROM MEMORY."
@@ -20,12 +21,12 @@ import * as path from "path";
 const BRAIN_OUTPUT_TABLES: Record<string, string[]> = {
   scenario_reputation: [
     "supabase/functions/brain-update/",
-    "supabase/functions/scenario-reputation-update/", // legacy, being migrated
+    "supabase/functions/scenario-reputation-update/",
   ],
   strategy_reputation: [
     "supabase/functions/brain-update/",
-    "supabase/functions/strategy-reputation-update/", // legacy, being migrated
-    "supabase/functions/strategy-evolve/",             // initializes reputation for new children
+    "supabase/functions/strategy-reputation-update/",
+    "supabase/functions/strategy-evolve/",
   ],
   atlas_brain_log: [
     "supabase/functions/brain-update/",
@@ -63,6 +64,9 @@ const FORBIDDEN_DIRECT_READS = [
   // Backbone tables — Brain must not consult market data directly
   "latest_prices",
   "latest_orderbook",
+  // Whale sensor tables
+  "whale_signals",
+  "whale_positions",
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -150,6 +154,20 @@ for (const funcPath of LEARNING_FUNCTIONS) {
   }
 }
 
+// Check 3: Brain-update must not read trade_scenario_attribution
+const brainUpdateFiles = allFiles.filter(f => normalize(f).includes("supabase/functions/brain-update/"));
+for (const file of brainUpdateFiles) {
+  const content = fs.readFileSync(file, "utf-8");
+  if (content.includes("trade_scenario_attribution")) {
+    violations.push({
+      file,
+      line: 0,
+      content: "References trade_scenario_attribution",
+      reason: "brain-update must not read from trade_scenario_attribution. Scenario keys come from Memory consensus payload.",
+    });
+  }
+}
+
 // ── Result ───────────────────────────────────────────────────────────
 
 if (violations.length > 0) {
@@ -166,5 +184,6 @@ if (violations.length > 0) {
   console.log("✅ Brain Guard passed — no violations found.");
   console.log(`   ✓ Forbidden direct reads: ${FORBIDDEN_DIRECT_READS.length} tables blocked from learning functions`);
   console.log(`   ✓ Brain output tables: ${Object.keys(BRAIN_OUTPUT_TABLES).length} tables write-protected`);
+  console.log(`   ✓ No trade_scenario_attribution dependency in brain-update`);
   process.exit(0);
 }

@@ -379,7 +379,9 @@ async function emitDecision(
             scenario_keys: scenarioKeys,
             scenario_weights: scenarioWeights,
             regime: best.regime || null,
-            strategy_blueprint_id: null, // populated when strategy selection exists
+            // Deterministic blueprint ID for strategy learning
+            // Format: baseline_v1:<type>:<regime>:<timeframe>:<direction>
+            strategy_blueprint_id: `baseline_v1:${best.type ?? "neutral"}:${(best.regime ?? "na").toLowerCase()}:${timeframe}:${direction}`,
           }},
           { source: "execution", status: "MISSING", reason: "not executed yet" },
         ];

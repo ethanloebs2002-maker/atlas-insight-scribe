@@ -11,6 +11,7 @@
  * ❌ Read from trade_scenario_attribution (scenarios come from Memory)
  * ❌ Read from paper_positions or paper_decisions
  * ❌ Read from sensor tables (market_context_snapshots, derivatives_context_snapshots, etc.)
+ * ❌ Read from Backbone tables (latest_prices, latest_orderbook)
  *
  * It ONLY reads from atlas_memory_events and brain output tables.
  * It updates belief state and logs what changed.
@@ -20,7 +21,7 @@
  */
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { brainLog, readRecentClosedMemory, newBrainTraceId } from "../_shared/brain.ts";
+import { brainLog, readRecentClosedMemory, newBrainTraceId, loadMemoryBundleBatch } from "../_shared/brain.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,28 +37,6 @@ function sbAdmin() {
 function clamp(x: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, x)); }
 
 const EMA_ALPHA = 0.1;
-
-/** Load the full Memory bundle for a position across all phases */
-async function loadMemoryBundle(positionId: string, sb: ReturnType<typeof createClient>) {
-  const { data } = await sb
-    .from("atlas_memory_events")
-    .select("id,trace_id,symbol,timeframe,phase,source,payload")
-    .eq("position_id", positionId)
-    .in("phase", ["DECISION_EMIT", "ENTRY_FILLED", "EXIT_CLOSED"])
-    .order("ts", { ascending: true });
-
-  const events = data ?? [];
-  const bundle: Record<string, Record<string, any>> = {};
-  const allIds: string[] = [];
-
-  for (const ev of events) {
-    const key = `${ev.phase}:${ev.source}`;
-    bundle[key] = ev;
-    allIds.push(ev.id);
-  }
-
-  return { bundle, allIds, events };
-}
 
 /** Extract scenario keys from DECISION_EMIT consensus Memory event */
 function extractScenarioKeys(bundle: Record<string, any>): {
@@ -115,7 +94,7 @@ serve(async (req) => {
   let closedEvents: any[] = [];
 
   if (positionId) {
-    // Single position mode — get EXIT_CLOSED execution event
+    // Single position mode
     const { data } = await sb
       .from("atlas_memory_events")
       .select("id,trace_id,position_id,symbol,timeframe,phase,source,payload")
@@ -135,6 +114,34 @@ serve(async (req) => {
     });
   }
 
+  // ── Step 2: Batch load Memory bundles (eliminates N+1) ────────────────
+  const positionIds = [...new Set(closedEvents.map(e => e.position_id).filter(Boolean))];
+
+  let bundleMap: Map<string, { bundle: Record<string, any>; allIds: string[]; events: any[] }>;
+
+  if (positionId) {
+    // Single position mode — load just one bundle
+    const { data } = await sb
+      .from("atlas_memory_events")
+      .select("id,trace_id,symbol,timeframe,phase,source,payload")
+      .eq("position_id", positionId)
+      .in("phase", ["DECISION_EMIT", "ENTRY_FILLED", "EXIT_CLOSED"])
+      .order("ts", { ascending: true });
+
+    const events = data ?? [];
+    const bundle: Record<string, any> = {};
+    const allIds: string[] = [];
+    for (const ev of events) {
+      bundle[`${ev.phase}:${ev.source}`] = ev;
+      allIds.push(ev.id);
+    }
+    bundleMap = new Map([[positionId, { bundle, allIds, events }]]);
+  } else {
+    // Batch mode — single query for all positions
+    bundleMap = await loadMemoryBundleBatch(positionIds, sb);
+  }
+
+  // ── Step 3: Process each closed trade ─────────────────────────────────
   let scenarioUpdates = 0;
   let strategyUpdates = 0;
   const brainLogs: any[] = [];
@@ -143,18 +150,20 @@ serve(async (req) => {
     const pid = memEvent.position_id;
     if (!pid) continue;
 
-    // ── Step 2: Load full Memory bundle for this position ────────────
-    const { bundle, allIds } = await loadMemoryBundle(pid, sb);
+    const bundleData = bundleMap.get(pid);
+    if (!bundleData) continue;
+
+    const { bundle, allIds } = bundleData;
     const symbol = memEvent.symbol;
 
-    // ── Extract outcome from EXIT_CLOSED execution event ─────────────
+    // Extract outcome from EXIT_CLOSED execution event
     const { outcome, realizedPnl, realizedR, strategyBlueprintId: exitBpId } = extractOutcome(bundle);
 
     const isExpired = outcome === "EXPIRED_NO_FILL" || outcome === "EXPIRED" || outcome === "EXPIRY";
     const isWin = !isExpired && (outcome === "TP" || realizedPnl > 0);
     const isLoss = !isExpired && !isWin && (outcome === "SL" || realizedPnl < 0);
 
-    // ── Extract scenario keys from DECISION_EMIT consensus event ─────
+    // Extract scenario keys from DECISION_EMIT consensus event
     const { keys: scenarioKeys, regime, timeframe, strategyBlueprintId: decBpId } = extractScenarioKeys(bundle);
 
     // ── Scenario Reputation Update (from Memory only) ────────────────
@@ -270,7 +279,7 @@ serve(async (req) => {
     }
   }
 
-  // ── Step 3: Log all brain updates for provenance ────────────────────
+  // ── Step 4: Log all brain updates for provenance ────────────────────
   if (brainLogs.length) {
     await brainLog(brainLogs, sb);
   }
@@ -280,6 +289,7 @@ serve(async (req) => {
     scenario_updates: scenarioUpdates,
     strategy_updates: strategyUpdates,
     memory_events_processed: closedEvents.length,
+    positions_loaded: bundleMap.size,
     brain_trace: brainTrace,
   }), {
     headers: { ...corsHeaders, "content-type": "application/json" },

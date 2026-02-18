@@ -10,6 +10,10 @@
  * MEMORY SAFE — reads only, never writes raw data.
  * All writes go through memoryWrite().
  *
+ * ANTI-DRIFT: Source list comes from atlas_memory_sources at runtime,
+ * NOT from hardcoded constants. This prevents drift when sources are
+ * added, removed, or renamed in the registry.
+ *
  * Usage:
  *   import { memoryFanOut } from "../_shared/memory_fanout.ts";
  *   await memoryFanOut(sb, phase, traceId, common, knownEvents);
@@ -20,12 +24,6 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { memoryWrite, type MemoryEvent } from "./memory.ts";
-
-/** All 10 registered sources */
-const ALL_SOURCES = [
-  "consensus", "market", "orderbook", "derivatives",
-  "execution", "risk_lab", "policy", "whale", "news", "strategy",
-];
 
 /** Max payload sizes */
 const MAX_OK_BYTES = 5120;
@@ -47,6 +45,49 @@ interface FanOutCommon {
   timeframe?: string | null;
 }
 
+// ── Runtime source cache (avoids per-call DB overhead) ─────────────────
+interface SourceRegistryEntry {
+  source: string;
+  required_at_phases: string[];
+}
+
+let _cachedSources: SourceRegistryEntry[] | null = null;
+let _cacheTs = 0;
+const CACHE_TTL_MS = 60_000; // 60 seconds
+
+/**
+ * Load registered sources from atlas_memory_sources.
+ * Cached in module scope with 60s TTL for Edge Function runtime.
+ */
+async function loadRegisteredSources(
+  sb: ReturnType<typeof createClient>,
+): Promise<SourceRegistryEntry[]> {
+  const now = Date.now();
+  if (_cachedSources && now - _cacheTs < CACHE_TTL_MS) {
+    return _cachedSources;
+  }
+
+  const { data, error } = await sb
+    .from("atlas_memory_sources")
+    .select("source, required_at_phases")
+    .eq("is_active", true)
+    .order("source", { ascending: true });
+
+  if (error || !data || data.length === 0) {
+    console.error("[memory_fanout] Failed to load sources from DB:", error?.message ?? "empty result");
+    // If cache exists but stale, keep using it rather than failing
+    if (_cachedSources) {
+      console.warn("[memory_fanout] Using stale cache as fallback");
+      return _cachedSources;
+    }
+    return [];
+  }
+
+  _cachedSources = data as SourceRegistryEntry[];
+  _cacheTs = now;
+  return _cachedSources;
+}
+
 /**
  * Truncate payload to size cap.
  * OK events → 5KB, MISSING/FAILED → 512B
@@ -56,11 +97,9 @@ function capPayload(payload: Record<string, unknown>, status: MemoryStatus): Rec
   const json = JSON.stringify(payload);
   if (json.length <= limit) return payload;
 
-  // For OK events, keep status + truncated flag + first few keys
   if (status === "OK") {
     return { status: "OK", _truncated: true, _original_size: json.length };
   }
-  // For MISSING/FAILED, keep status + reason only
   return { status, reason: String(payload.reason ?? "payload truncated").slice(0, 200) };
 }
 
@@ -70,13 +109,16 @@ function capPayload(payload: Record<string, unknown>, status: MemoryStatus): Rec
  * BACKBONE SAFE: This function does NOT call fetch() to any external URL.
  * All source data must be provided by the caller (who reads from canonical DB tables).
  *
+ * ANTI-DRIFT: Source list is loaded from atlas_memory_sources at runtime,
+ * filtered by required_at_phases for the current phase.
+ *
  * @param sb       - Supabase admin client
  * @param phase    - DECISION_EMIT | ENTRY_FILLED | EXIT_CLOSED
  * @param traceId  - shared trace_id for this lifecycle moment
  * @param common   - shared fields (position_id, decision_id, symbol, timeframe)
  * @param known    - array of source events with real data or explicit failures
  *
- * Sources not present in `known` get an automatic MISSING event.
+ * Sources registered for this phase but not in `known` get an automatic MISSING event.
  */
 export async function memoryFanOut(
   sb: ReturnType<typeof createClient>,
@@ -85,6 +127,18 @@ export async function memoryFanOut(
   common: FanOutCommon,
   known: SourceEvent[],
 ): Promise<{ ok: boolean; written: number; error?: string }> {
+  // Load sources from DB registry (cached)
+  const registeredSources = await loadRegisteredSources(sb);
+
+  if (registeredSources.length === 0) {
+    return { ok: false, written: 0, error: "no memory sources found in atlas_memory_sources" };
+  }
+
+  // Filter to sources required at this phase
+  const sourcesForPhase = registeredSources.filter(
+    s => Array.isArray(s.required_at_phases) && s.required_at_phases.includes(phase),
+  );
+
   const knownMap = new Map<string, SourceEvent>();
   for (const k of known) {
     knownMap.set(k.source, k);
@@ -92,7 +146,8 @@ export async function memoryFanOut(
 
   const events: MemoryEvent[] = [];
 
-  for (const source of ALL_SOURCES) {
+  for (const reg of sourcesForPhase) {
+    const source = reg.source;
     const k = knownMap.get(source);
     if (k) {
       const rawPayload: Record<string, unknown> = {
@@ -126,6 +181,10 @@ export async function memoryFanOut(
         },
       });
     }
+  }
+
+  if (events.length === 0) {
+    return { ok: true, written: 0, error: "no sources required at this phase" };
   }
 
   const result = await memoryWrite(events, sb);
