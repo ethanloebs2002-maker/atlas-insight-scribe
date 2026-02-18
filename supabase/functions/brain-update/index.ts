@@ -70,12 +70,24 @@ async function readCursor(sb: SB): Promise<string> {
   return (data?.last_ts ?? "1970-01-01T00:00:00Z") as string;
 }
 
-async function writeCursor(sb: SB, newTs: string): Promise<void> {
-  const { error } = await sb
+async function writeCursorCAS(sb: SB, expectedOld: string, newTs: string): Promise<boolean> {
+  const { data, error } = await sb
     .from("atlas_brain_cursor")
     .update({ last_ts: newTs })
-    .eq("id", 1);
-  if (error) throw new Error(`[brain] cursor write failed: ${error.message}`);
+    .eq("id", 1)
+    .eq("last_ts", expectedOld)
+    .select("last_ts")
+    .maybeSingle();
+  if (error) throw new Error(`[brain] cursor CAS write failed: ${error.message}`);
+  return !!data; // true if we won the race
+}
+
+function bumpMaxHandled(current: string | null, ts?: string | null): string | null {
+  if (!ts) return current;
+  const ms = Date.parse(ts);
+  if (!Number.isFinite(ms)) return current;
+  if (!current) return ts;
+  return ms > Date.parse(current) ? ts : current;
 }
 
 // ── Boundary Helpers ────────────────────────────────────────────────────
@@ -218,6 +230,7 @@ serve(async (req) => {
   let skippedCohort = 0;
   let skippedEpoch = 0;
   let skippedNoConsensus = 0;
+  let maxHandledTs: string | null = null;
   const brainLogs: any[] = [];
 
   for (const memEvent of closedEvents) {
@@ -234,17 +247,22 @@ serve(async (req) => {
     const exitEv = getExitClosedEvent(mb);
     if (!exitEv) {
       console.log("[brain] skip: no EXIT_CLOSED in bundle", { positionId: pid });
+      // Do NOT bump cursor — this is potentially fixable
       continue;
     }
 
     if (!cohortAllows(exitEv)) {
+      // Terminal discard: legacy cohort will NEVER be learned → safe to advance cursor past
       console.log("[brain] skip: cohort blocked", { positionId: pid, cohort_id: exitEv.cohort_id });
+      maxHandledTs = bumpMaxHandled(maxHandledTs, exitEv.ts ?? exitEv.created_at);
       skippedCohort++;
       continue;
     }
 
     if (!epochAllows(exitEv)) {
+      // Terminal discard: before epoch will NEVER be learned → safe to advance cursor past
       console.log("[brain] skip: before epoch", { positionId: pid, ts: exitEv.ts ?? exitEv.created_at });
+      maxHandledTs = bumpMaxHandled(maxHandledTs, exitEv.ts ?? exitEv.created_at);
       skippedEpoch++;
       continue;
     }
@@ -401,6 +419,9 @@ serve(async (req) => {
 
       strategyUpdates++;
     }
+
+    // ── Bump cursor: this event was successfully learned ──────────────
+    maxHandledTs = bumpMaxHandled(maxHandledTs, exitEv.ts ?? exitEv.created_at);
   }
 
   // ── Step 4: Log all brain updates for provenance ────────────────────
@@ -408,17 +429,22 @@ serve(async (req) => {
     await brainLog(brainLogs, sb);
   }
 
-  // ── Step 5: Advance cursor (batch mode only, after successful processing)
-  if (!positionId && closedEvents.length > 0) {
-    const maxTs = closedEvents
-      .map((e: any) => e.ts)
-      .filter(Boolean)
-      .sort()
-      .slice(-1)[0];
-    if (maxTs) {
-      await writeCursor(sb, maxTs);
-      console.log("[brain] cursor advanced", { newCursor: maxTs });
+  // ── Step 5: Advance cursor via CAS (batch mode only) ────────────────
+  let cursorAdvanced = false;
+  if (!positionId && maxHandledTs && cursorTs) {
+    const ok = await writeCursorCAS(sb, cursorTs, maxHandledTs);
+    if (!ok) {
+      console.log("[brain] cursor CAS lost race; aborting to prevent double-learn", {
+        expected: cursorTs, attempted: maxHandledTs,
+      });
+      return new Response(JSON.stringify({
+        ok: true, updated: 0,
+        msg: "lost cursor race; retry next cron",
+        cursor: cursorTs,
+      }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
+    cursorAdvanced = true;
+    console.log("[brain] cursor advanced", { oldCursor: cursorTs, newCursor: maxHandledTs });
   }
 
   return new Response(JSON.stringify({
@@ -428,7 +454,7 @@ serve(async (req) => {
     memory_events_processed: closedEvents.length,
     positions_loaded: bundleMap.size,
     brain_trace: brainTrace,
-    cursor_advanced: !positionId,
+    cursor_advanced: cursorAdvanced,
     skipped: { cohort: skippedCohort, epoch: skippedEpoch, no_consensus: skippedNoConsensus },
   }), {
     headers: { ...corsHeaders, "content-type": "application/json" },
