@@ -29,3 +29,10 @@ export function lockLegacy(): void {
     localStorage.removeItem(LEGACY_UNLOCK_KEY);
   } catch {}
 }
+
+/**
+ * Hard gate: legacy is visible only if unlocked AND the user toggled it on.
+ */
+export function canShowLegacy(includeLegacy: boolean): boolean {
+  return includeLegacy && isLegacyUnlocked();
+}
