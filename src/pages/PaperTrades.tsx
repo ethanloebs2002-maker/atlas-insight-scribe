@@ -48,26 +48,6 @@ function filterByCohort<T extends { cohort_id?: string | null }>(rows: T[], coho
   return rows.filter(r => r.cohort_id === cohortId);
 }
 
-function deriveCohortMetrics(decisions: any[], positions: any[]) {
-  const closedPos = positions.filter((p: any) => p.status === "CLOSED");
-  const openPos = positions.filter((p: any) => p.status === "OPEN");
-  const pendingPos = positions.filter((p: any) => p.status === "PENDING_ENTRY");
-  const wins = closedPos.filter((p: any) => p.outcome === "TP" || Number(p.realized_pnl ?? 0) > 0).length;
-  const losses = closedPos.filter((p: any) => p.outcome === "SL" || Number(p.realized_pnl ?? 0) < 0).length;
-  const winRate = closedPos.length > 0 ? (wins / closedPos.length) * 100 : 0;
-  const rValues = closedPos.map((p: any) => Number(p.r_multiple ?? p.realized_r ?? 0)).filter((v: number) => Number.isFinite(v));
-  const avgR = rValues.length > 0 ? rValues.reduce((a: number, b: number) => a + b, 0) / rValues.length : 0;
-  const evaluated = decisions.filter((d: any) => d.evaluated_at);
-  const correct = evaluated.filter((d: any) => d.correct);
-  const dirAcc = evaluated.length > 0 ? (correct.length / evaluated.length) * 100 : 0;
-  return {
-    decisionsCount: decisions.length,
-    openCount: openPos.length,
-    closedCount: closedPos.length,
-    pendingCount: pendingPos.length,
-    wins, losses, winRate, dirAcc, avgR,
-  };
-}
 
 export default function PaperTrades() {
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
@@ -81,7 +61,6 @@ export default function PaperTrades() {
 
   const sched = useAutoEvaluationScheduler(runAutoEvalTick, !paused && !!selectedAsset);
   const cohort = useCohort();
-  const isCompare = cohort.mode === "compare";
   const { data: assetsRes } = useIncorporatedAssets();
   const incorporatedAssets = (assetsRes?.data || []) as { asset_id: string; symbol: string; is_enabled: boolean }[];
   const ASSETS = incorporatedAssets.length > 0
@@ -125,32 +104,55 @@ export default function PaperTrades() {
   // Selected VM
   const selectedVM = useMemo(() => allVMs.find(vm => vm.id === selectedVmId) ?? null, [allVMs, selectedVmId]);
 
-  // Stats derived from VMs
-  const evaluatedDecisions = decisions.filter((d: any) => d.evaluated_at);
-  const correctDecisions = evaluatedDecisions.filter((d: any) => d.correct);
-  const dirAcc = evaluatedDecisions.length > 0 ? (correctDecisions.length / evaluatedDecisions.length * 100) : 0;
-  const closedReturns = closedVMs.filter(vm => vm.performance?.realizedR != null).map(vm => vm.performance!.realizedR!);
-  const avgR = closedReturns.length > 0 ? closedReturns.reduce((a, b) => a + b, 0) / closedReturns.length : 0;
-  const sortedR = [...closedReturns].sort((a, b) => a - b);
+  // ─── COHORT-AWARE METRICS ─────────────────────────────────────
+  // Filter decisions/trades by cohort for metrics
+  const metricsDecisions = useMemo(() => {
+    if (cohort.includeLegacy) return decisions; // brain + legacy = all
+    return filterByCohort(decisions, COHORTS.brain);
+  }, [decisions, cohort.includeLegacy]);
+
+  const metricsTrades = useMemo(() => {
+    if (cohort.includeLegacy) return trades;
+    return filterByCohort(trades, COHORTS.brain);
+  }, [trades, cohort.includeLegacy]);
+
+  const metricsClosedVMs = useMemo(() => {
+    if (cohort.includeLegacy) return closedVMs;
+    return closedVMs.filter(vm => {
+      const pos = positionsByDecisionId.get(vm.decisionId ?? "");
+      return pos?.cohort_id === COHORTS.brain;
+    });
+  }, [closedVMs, cohort.includeLegacy, positionsByDecisionId]);
+
+  const metricsOpenVMs = useMemo(() => {
+    if (cohort.includeLegacy) return openVMs;
+    return openVMs.filter(vm => {
+      const pos = positionsByDecisionId.get(vm.decisionId ?? "");
+      return pos?.cohort_id === COHORTS.brain;
+    });
+  }, [openVMs, cohort.includeLegacy, positionsByDecisionId]);
+
+  const metricsPendingVMs = useMemo(() => {
+    if (cohort.includeLegacy) return pendingVMs;
+    return pendingVMs.filter(vm => {
+      const pos = positionsByDecisionId.get(vm.decisionId ?? "");
+      return pos?.cohort_id === COHORTS.brain;
+    });
+  }, [pendingVMs, cohort.includeLegacy, positionsByDecisionId]);
+
+  // Stats derived from filtered VMs
+  const mEvaluatedDecisions = metricsDecisions.filter((d: any) => d.evaluated_at);
+  const mCorrectDecisions = mEvaluatedDecisions.filter((d: any) => d.correct);
+  const mDirAcc = mEvaluatedDecisions.length > 0 ? (mCorrectDecisions.length / mEvaluatedDecisions.length * 100) : 0;
+  const mClosedReturns = metricsClosedVMs.filter(vm => vm.performance?.realizedR != null).map(vm => vm.performance!.realizedR!);
+  const mAvgR = mClosedReturns.length > 0 ? mClosedReturns.reduce((a, b) => a + b, 0) / mClosedReturns.length : 0;
+  const mWins = metricsClosedVMs.filter(vm => vm.performance?.isWin === true).length;
+  const mClosedCount = metricsClosedVMs.length;
+  const hasClosedTrades = mClosedCount > 0;
+  const losses = metricsClosedVMs.filter(vm => vm.performance?.isWin === false).length;
+  const sortedR = [...mClosedReturns].sort((a, b) => a - b);
   const medianR = sortedR.length > 0 ? sortedR[Math.floor(sortedR.length / 2)] : 0;
-  const wins = closedVMs.filter(vm => vm.performance?.isWin === true).length;
-  const losses = closedVMs.filter(vm => vm.performance?.isWin === false).length;
   const visibleHorizons = showLearning ? config.learningHorizons : config.publicHorizons;
-
-  // ─── COHORT COMPARE METRICS (from same in-memory arrays) ────
-  const cohortMetrics = useMemo(() => {
-    if (!isCompare) return null;
-    const brainDec = filterByCohort(decisions, COHORTS.brain);
-    const brainPos = filterByCohort(trades, COHORTS.brain);
-    return deriveCohortMetrics(brainDec, brainPos);
-  }, [isCompare, decisions, trades]);
-
-  const legacyMetrics = useMemo(() => {
-    if (!isCompare) return null;
-    const legDec = filterByCohort(decisions, COHORTS.legacy);
-    const legPos = filterByCohort(trades, COHORTS.legacy);
-    return deriveCohortMetrics(legDec, legPos);
-  }, [isCompare, decisions, trades]);
 
   // Filter by search
   const filterVMs = (vms: TradeVM[]) =>
@@ -216,46 +218,31 @@ export default function PaperTrades() {
 
       {/* ─── SUMMARY CARDS ──────────────────────────────────── */}
       <div className="px-4 pt-3">
-        {isCompare ? (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">Cohort Comparison</span>
-              <span className="text-[8px] font-mono text-muted-foreground/50">Compare mode affects metrics only; lists show selected cohort.</span>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              <CompareCard label="Decisions" left={cohortMetrics?.decisionsCount ?? 0} right={legacyMetrics?.decisionsCount ?? 0} />
-              <CompareCard label="Directional Accuracy" left={`${(cohortMetrics?.dirAcc ?? 0).toFixed(1)}%`} right={`${(legacyMetrics?.dirAcc ?? 0).toFixed(1)}%`} />
-              <CompareCard label="Win Rate" left={`${(cohortMetrics?.winRate ?? 0).toFixed(1)}%`} right={`${(legacyMetrics?.winRate ?? 0).toFixed(1)}%`} />
-              <CompareCard label="Avg R" left={(cohortMetrics?.avgR ?? 0).toFixed(3)} right={(legacyMetrics?.avgR ?? 0).toFixed(3)} />
-              <CompareCard label="Open / Closed" left={`${cohortMetrics?.openCount ?? 0} / ${cohortMetrics?.closedCount ?? 0}`} right={`${legacyMetrics?.openCount ?? 0} / ${legacyMetrics?.closedCount ?? 0}`} />
-            </div>
-          </div>
-        ) : (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             <SummaryCard
-              label={decisions.length >= 200 ? "Decisions (Showing Last 200)" : "Total Decisions"}
-              value={decisions.length}
+              label={metricsDecisions.length >= 200 ? "Decisions (Showing Last 200)" : "Total Decisions"}
+              value={metricsDecisions.length}
               icon={<Target className="h-3 w-3" />}
-              tooltipId={decisions.length >= 200 ? "metric-total-decisions-capped" : "metric-total-decisions"}
+              tooltipId={metricsDecisions.length >= 200 ? "metric-total-decisions-capped" : "metric-total-decisions"}
               scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
-              window={decisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
+              window={metricsDecisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
               cohortLabel={cohort.label}
             />
             <SummaryCard
               label="Directional Accuracy"
-              value={`${dirAcc.toFixed(1)}%`}
+              value={hasClosedTrades ? `${mDirAcc.toFixed(1)}%` : "—"}
               icon={<TrendingUp className="h-3 w-3" />}
-              accent={dirAcc >= 65}
+              accent={hasClosedTrades && mDirAcc >= 65}
               tooltipId="metric-directional-accuracy"
               scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
-              window={decisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
+              window={metricsDecisions.length >= 200 ? "Last 200 Decisions" : "Lifetime"}
               cohortLabel={cohort.label}
             />
             <SummaryCard
               label="Average Risk-Adjusted Return"
-              value={avgR.toFixed(3)}
+              value={hasClosedTrades ? mAvgR.toFixed(3) : "—"}
               icon={<TrendingUp className="h-3 w-3" />}
-              accent={avgR > 0}
+              accent={hasClosedTrades && mAvgR > 0}
               tooltipId="metric-avg-r"
               scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
               window="Closed Trades"
@@ -263,7 +250,7 @@ export default function PaperTrades() {
             />
             <SummaryCard
               label="Win Rate"
-              value={closedVMs.length > 0 ? `${((wins / closedVMs.length) * 100).toFixed(1)}%` : "—"}
+              value={hasClosedTrades ? `${((mWins / mClosedCount) * 100).toFixed(1)}%` : "—"}
               icon={<CheckCircle2 className="h-3 w-3" />}
               tooltipId="metric-win-rate"
               scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
@@ -272,7 +259,7 @@ export default function PaperTrades() {
             />
             <SummaryCard
               label="Open / Pending"
-              value={`${openVMs.length} / ${pendingVMs.length}`}
+              value={`${metricsOpenVMs.length} / ${metricsPendingVMs.length}`}
               icon={<Shield className="h-3 w-3" />}
               tooltipId="metric-open-pending"
               scope={selectedAsset ? `Asset: ${selectedAsset}` : "Asset: All Assets"}
@@ -280,7 +267,11 @@ export default function PaperTrades() {
               cohortLabel={cohort.label}
             />
           </div>
-        )}
+          {!hasClosedTrades && (
+            <p className="text-[9px] font-mono text-muted-foreground/60 mt-1.5">
+              Waiting for first closed trades to populate learning metrics.
+            </p>
+          )}
       </div>
 
       {/* ─── MAIN CONTENT ───────────────────────────────────── */}
@@ -383,12 +374,12 @@ export default function PaperTrades() {
                   <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Expectancy Metrics</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <MetricRow label="Average Return R" value={avgR.toFixed(4)} positive={avgR > 0} />
+                  <MetricRow label="Average Return R" value={mAvgR.toFixed(4)} positive={mAvgR > 0} />
                   <MetricRow label="Median R" value={medianR.toFixed(4)} positive={medianR > 0} />
-                  <MetricRow label="Win Rate" value={closedVMs.length > 0 ? `${((wins / closedVMs.length) * 100).toFixed(1)}%` : "—"} positive={wins > losses} />
-                  <MetricRow label="W / L" value={`${wins} / ${losses}`} positive={wins > losses} />
-                  <MetricRow label="Total Closed" value={String(closedVMs.length)} />
-                  <MetricRow label="Directional Accuracy" value={`${dirAcc.toFixed(1)}%`} positive={dirAcc >= 65} />
+                  <MetricRow label="Win Rate" value={hasClosedTrades ? `${((mWins / mClosedCount) * 100).toFixed(1)}%` : "—"} positive={mWins > losses} />
+                  <MetricRow label="W / L" value={`${mWins} / ${losses}`} positive={mWins > losses} />
+                  <MetricRow label="Total Closed" value={String(mClosedCount)} />
+                  <MetricRow label="Directional Accuracy" value={`${mDirAcc.toFixed(1)}%`} positive={mDirAcc >= 65} />
                 </CardContent>
               </Card>
             </div>
@@ -693,27 +684,6 @@ function SummaryCard({ label, value, icon, accent, tooltipId, scope, window: tim
   );
 }
 
-function CompareCard({ label, left, right }: {
-  label: string;
-  left: string | number;
-  right: string | number;
-}) {
-  return (
-    <Card className="py-2 px-3">
-      <div className="text-[9px] font-mono uppercase text-muted-foreground mb-1 truncate">{label}</div>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <div className="text-[7px] font-mono text-pillar-brain/80 mb-0.5">Brain</div>
-          <div className="text-sm font-mono font-bold">{left}</div>
-        </div>
-        <div>
-          <div className="text-[7px] font-mono text-pillar-memory/80 mb-0.5">Legacy</div>
-          <div className="text-sm font-mono font-bold text-muted-foreground">{right}</div>
-        </div>
-      </div>
-    </Card>
-  );
-}
 
 function MetricRow({ label, value, positive }: { label: string; value: string; positive?: boolean }) {
   return (
