@@ -1683,6 +1683,42 @@ export type Database = {
           },
         ]
       }
+      market_bars_1m: {
+        Row: {
+          bucket_ts: string
+          close: number | null
+          first_seen_at: string
+          high: number | null
+          last_seen_at: string
+          low: number | null
+          open: number | null
+          samples_n: number
+          symbol: string
+        }
+        Insert: {
+          bucket_ts: string
+          close?: number | null
+          first_seen_at?: string
+          high?: number | null
+          last_seen_at?: string
+          low?: number | null
+          open?: number | null
+          samples_n?: number
+          symbol: string
+        }
+        Update: {
+          bucket_ts?: string
+          close?: number | null
+          first_seen_at?: string
+          high?: number | null
+          last_seen_at?: string
+          low?: number | null
+          open?: number | null
+          samples_n?: number
+          symbol?: string
+        }
+        Relationships: []
+      }
       market_context_snapshots: {
         Row: {
           ask_depth_usd: number | null
@@ -5214,6 +5250,15 @@ export type Database = {
         Returns: boolean
       }
       is_user_active: { Args: { _user_id: string }; Returns: boolean }
+      prune_market_bars_1m: { Args: { p_keep_days?: number }; Returns: number }
+      refresh_market_volatility_rollups: {
+        Args: { p_symbol: string }
+        Returns: undefined
+      }
+      upsert_market_bar_1m: {
+        Args: { p_price: number; p_symbol: string; p_ts: string }
+        Returns: undefined
+      }
     }
     Enums: {
       admin_msg_category: "maturity" | "warning" | "audit" | "manual"

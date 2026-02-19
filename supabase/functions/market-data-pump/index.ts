@@ -138,7 +138,15 @@ serve(async (req) => {
         captured_at: nowIso,
       }, { onConflict: "symbol" });
 
-    if (!priceErr) pricesWritten++;
+    if (!priceErr) {
+      pricesWritten++;
+      // Feed 1m OHLC bar from this tick (Backbone-safe: no external fetch)
+      await sb.rpc("upsert_market_bar_1m", {
+        p_symbol: symbol,
+        p_price: mid,
+        p_ts: nowIso,
+      });
+    }
 
     // Upsert latest_orderbook
     const { error: obErr } = await sb

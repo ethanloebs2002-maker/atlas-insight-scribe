@@ -74,3 +74,6 @@ verify_jwt = false
 
 [functions.brain-update]
 verify_jwt = false
+
+[functions.backbone-volatility-update]
+verify_jwt = false
