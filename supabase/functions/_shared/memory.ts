@@ -3,6 +3,8 @@
  *
  * All experiential writes must go through this module.
  * This is the canonical ingress for atlas_memory_events.
+ *
+ * COLOSSAL PATCH: real payload truncation + cohort_id support.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -16,12 +18,16 @@ export interface MemoryEvent {
   phase: string;  // DECISION_EMIT | ENTRY_FILLED | EXIT_CLOSED | CADENCE_OBSERVE | POLICY_UPDATE | LEARNING_UPDATE
   source: string; // must be registered in atlas_memory_sources
   payload: Record<string, unknown>;
+  cohort_id?: string | null;
 }
 
 const ALLOWED_PHASES = [
   "DECISION_EMIT", "ENTRY_FILLED", "EXIT_CLOSED",
   "CADENCE_OBSERVE", "POLICY_UPDATE", "LEARNING_UPDATE",
 ];
+
+const MAX_PAYLOAD_BYTES = 10_240; // 10KB
+const MAX_TRUNC_NOTE_BYTES = 512;
 
 function sbAdmin() {
   return createClient(
@@ -31,8 +37,60 @@ function sbAdmin() {
   );
 }
 
+function jsonSize(x: unknown): number {
+  try { return JSON.stringify(x).length; } catch { return 999_999; }
+}
+
+/**
+ * Truncate payload deterministically:
+ * - Prefer keeping shallow keys and removing large nested blobs
+ * - Always include `_truncated` marker when truncation occurs
+ */
+function truncatePayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const size = jsonSize(payload);
+  if (size <= MAX_PAYLOAD_BYTES) return payload;
+
+  // Keep only safe top-level keys if present
+  const KEEP = [
+    "status", "reason", "outcome", "close_reason",
+    "realized_pnl", "r_multiple", "entry", "exit",
+    "side", "timeframe", "strategy_blueprint_id",
+    "probability", "confidence", "components",
+    "data", "metadata",
+  ];
+
+  const slim: Record<string, unknown> = {};
+  for (const k of KEEP) {
+    if (k in payload) slim[k] = payload[k];
+  }
+
+  // If still too big, nuke heavy keys
+  if (jsonSize(slim) > MAX_PAYLOAD_BYTES) {
+    delete slim.data;
+    delete slim.metadata;
+    delete slim.components;
+  }
+
+  // Final guarantee
+  if (jsonSize(slim) > MAX_PAYLOAD_BYTES) {
+    const note = {
+      _truncated: true,
+      _original_size: size,
+      _kept_keys: Object.keys(slim),
+    };
+    return { _truncated: true, note: JSON.stringify(note).slice(0, MAX_TRUNC_NOTE_BYTES) };
+  }
+
+  return {
+    ...slim,
+    _truncated: true,
+    _original_size: size,
+  };
+}
+
 /**
  * Write one or more memory events. Validates source + phase.
+ * Enforces payload truncation.
  * Returns { ok, ids } or { ok: false, error }.
  */
 export async function memoryWrite(
@@ -66,23 +124,16 @@ export async function memoryWrite(
     }
   }
 
-  // Enforce payload size (~10KB max)
-  for (const e of arr) {
-    const size = JSON.stringify(e.payload).length;
-    if (size > 10240) {
-      console.warn(`[memory] Payload for ${e.phase}/${e.source} is ${size} bytes (>10KB), truncating metadata`);
-    }
-  }
-
   const rows = arr.map(e => ({
     trace_id: e.trace_id,
     position_id: e.position_id ?? null,
     decision_id: e.decision_id ?? null,
+    cohort_id: e.cohort_id ?? null,
     symbol: e.symbol,
     timeframe: e.timeframe ?? null,
     phase: e.phase,
     source: e.source,
-    payload: e.payload,
+    payload: truncatePayload(e.payload ?? {}),
   }));
 
   console.log("[MEMORY_WRITE]", arr[0]?.phase, "writing", rows.length, "rows", { trace_id: arr[0]?.trace_id });

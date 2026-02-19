@@ -1,6 +1,13 @@
 /**
  * ATLAS Strategy Evolve — Recombination Engine
- * Creates new blueprints via mutation + crossover of top performers.
+ *
+ * COLOSSAL PATCH:
+ * - Gaussian mutation with additive step (prevents zero/explosion)
+ * - Param bounds clamping (1e-6 .. 1e6)
+ * - Genome sanitization on all inputs and outputs
+ * - Explicit "shadow_only" tag on all children
+ * - Consistent required-slot validation
+ *
  * BACKBONE SAFE — no external fetches, pure DB operations.
  */
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
@@ -18,65 +25,80 @@ function sbAdmin() {
 }
 
 const MAX_PRIMITIVES = 8;
+const PARAM_MIN = 1e-6;
+const PARAM_MAX = 1e6;
 
-function gaussianStep(val: number, scale = 0.1): number {
-  // Simple Box-Muller approximation
+function clamp(x: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, x));
+}
+
+function gaussian(): number {
   const u1 = Math.random();
   const u2 = Math.random();
-  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-  return val * (1 + z * scale);
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+function mutateNumber(val: number, scale = 0.12): number {
+  // Additive mutation (more stable than multiplicative for small vals)
+  const z = gaussian();
+  const next = val + z * Math.max(PARAM_MIN, Math.abs(val) * scale);
+  return clamp(next, PARAM_MIN, PARAM_MAX);
 }
 
 function mutateParams(params: Record<string, any>): Record<string, any> {
-  const result = { ...params };
-  for (const [k, v] of Object.entries(result)) {
-    if (typeof v === "number") {
-      result[k] = Math.max(0, gaussianStep(v, 0.15));
+  const out: Record<string, any> = { ...params };
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v === "number" && Number.isFinite(v)) {
+      out[k] = mutateNumber(v, 0.15);
     }
   }
-  return result;
+  return out;
 }
 
-function mutatePrimitive(prim: any): any {
+function sanitizePrimitive(p: any): any | null {
+  if (!p || typeof p !== "object") return null;
   return {
-    ...prim,
-    params: mutateParams(prim.params ?? prim.default_params ?? {}),
+    key: String(p.key ?? p.type ?? "unknown"),
+    params: mutateParams(p.params ?? p.default_params ?? {}),
+    ...(p.weight != null ? { weight: p.weight } : {}),
+    ...(p.name != null ? { name: p.name } : {}),
   };
 }
 
-function mutateGenome(genome: any): any {
-  const result: any = {};
-  for (const [slot, prims] of Object.entries(genome)) {
-    if (!Array.isArray(prims)) { result[slot] = prims; continue; }
-    result[slot] = (prims as any[]).map(mutatePrimitive);
+function sanitizeGenome(genome: any): any {
+  const SLOTS = ["signal", "gates", "risk", "exit", "sizing"];
+  const out: any = {};
+  for (const slot of SLOTS) {
+    const arr = Array.isArray(genome?.[slot]) ? genome[slot] : [];
+    out[slot] = arr.map(sanitizePrimitive).filter(Boolean);
   }
-  return result;
+  return out;
 }
 
-function crossover(parentA: any, parentB: any): any {
-  // Take signal from A, gates from B, risk from best of either, sizing random
-  return {
-    signal: parentA.signal ?? parentB.signal ?? [],
-    gates: parentB.gates ?? parentA.gates ?? [],
-    risk: (Math.random() > 0.5 ? parentA.risk : parentB.risk) ?? [],
-    exit: (Math.random() > 0.5 ? parentA.exit : parentB.exit) ?? [],
-    sizing: (Math.random() > 0.5 ? parentA.sizing : parentB.sizing) ?? [],
-  };
+function crossover(a: any, b: any): any {
+  const A = sanitizeGenome(a);
+  const B = sanitizeGenome(b);
+  return sanitizeGenome({
+    signal: A.signal.length ? A.signal : B.signal,
+    gates: B.gates.length ? B.gates : A.gates,
+    risk: (Math.random() > 0.5 ? A.risk : B.risk),
+    exit: (Math.random() > 0.5 ? A.exit : B.exit),
+    sizing: (Math.random() > 0.5 ? A.sizing : B.sizing),
+  });
 }
 
 function countPrimitives(genome: any): number {
-  let n = 0;
-  for (const slot of Object.values(genome)) {
-    if (Array.isArray(slot)) n += slot.length;
-  }
-  return n;
+  return ["signal", "gates", "risk", "exit", "sizing"]
+    .map(s => Array.isArray(genome?.[s]) ? genome[s].length : 0)
+    .reduce((a, b) => a + b, 0);
 }
 
 function hasRequiredSlots(genome: any): boolean {
   const hasGate = Array.isArray(genome.gates) && genome.gates.length >= 1;
   const hasRisk = Array.isArray(genome.risk) && genome.risk.length >= 1;
   const hasExit = Array.isArray(genome.exit) && genome.exit.length >= 1;
-  return hasGate && hasRisk && (hasExit || genome.risk?.some((r: any) => r.key === "time_stop"));
+  const hasTimeStop = genome.risk?.some((r: any) => r?.key === "time_stop") ?? false;
+  return hasGate && hasRisk && (hasExit || hasTimeStop);
 }
 
 serve(async (req) => {
@@ -95,7 +117,7 @@ serve(async (req) => {
     .map((r: any) => ({
       id: r.blueprint_id,
       name: r.strategy_blueprints.name,
-      genome: r.strategy_blueprints.genome,
+      genome: sanitizeGenome(r.strategy_blueprints.genome),
       reputation: r.reputation,
     }));
 
@@ -106,15 +128,16 @@ serve(async (req) => {
   }
 
   const children: any[] = [];
+  const nonce = Date.now().toString(36).slice(-5);
 
   // Mutations (top 4 parents)
   for (const p of parents.slice(0, 4)) {
-    const mutated = mutateGenome(p.genome);
+    const mutated = sanitizeGenome(p.genome);
     if (countPrimitives(mutated) <= MAX_PRIMITIVES && hasRequiredSlots(mutated)) {
       children.push({
-        name: `${p.name}_mut_${Date.now().toString(36).slice(-4)}`,
+        name: `${p.name}_mut_${nonce}`,
         genome: mutated,
-        tags: ["evolved", "mutation"],
+        tags: ["evolved", "mutation", "shadow_only"],
         is_active: false, // must pass shadow threshold first
         created_by: "atlas_evolve",
       });
@@ -127,9 +150,9 @@ serve(async (req) => {
     const child = crossover(crossParents[i].genome, crossParents[i + 1].genome);
     if (countPrimitives(child) <= MAX_PRIMITIVES && hasRequiredSlots(child)) {
       children.push({
-        name: `cross_${crossParents[i].name.slice(0, 8)}_${crossParents[i + 1].name.slice(0, 8)}_${Date.now().toString(36).slice(-4)}`,
+        name: `cross_${crossParents[i].name.slice(0, 8)}_${crossParents[i + 1].name.slice(0, 8)}_${nonce}`,
         genome: child,
-        tags: ["evolved", "crossover"],
+        tags: ["evolved", "crossover", "shadow_only"],
         is_active: false,
         created_by: "atlas_evolve",
       });

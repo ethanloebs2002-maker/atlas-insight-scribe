@@ -10,6 +10,8 @@
  * ❌ No price fetching
  * ❌ No execution
  * ❌ No Memory mutation
+ *
+ * COLOSSAL PATCH: cohort-aware readers + DEFAULT_BRAIN_COHORT guard.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -35,6 +37,8 @@ const ALLOWED_UPDATE_TYPES = [
   "POLICY_TUNE",
   "GRADUATION_CHECK",
 ];
+
+const DEFAULT_BRAIN_COHORT = Deno.env.get("BRAIN_DEFAULT_COHORT") ?? "brain_online_2026_02_17";
 
 function sbAdmin() {
   return createClient(
@@ -91,42 +95,59 @@ export async function brainLog(
 
 /**
  * Read memory events for a given position (the Brain's ONLY data source).
- * Returns EXIT_CLOSED and LEARNING_UPDATE events for closed trade learning.
+ * Now cohort-aware: defaults to DEFAULT_BRAIN_COHORT to prevent legacy contamination.
+ * Pass cohortId=null explicitly to read all cohorts.
  */
 export async function readMemoryForPosition(
   positionId: string,
   sb: ReturnType<typeof createClient>,
+  cohortId?: string | null,
 ): Promise<any[]> {
-  const { data } = await sb
+  const cohort = cohortId === undefined ? DEFAULT_BRAIN_COHORT : cohortId;
+
+  let q = sb
     .from("atlas_memory_events")
-    .select("id,trace_id,symbol,timeframe,phase,source,payload")
+    .select("id,trace_id,symbol,timeframe,phase,source,payload,decision_id,position_id,cohort_id,ts")
     .eq("position_id", positionId)
     .in("phase", ["EXIT_CLOSED", "ENTRY_FILLED", "DECISION_EMIT", "LEARNING_UPDATE"])
     .order("ts", { ascending: true });
+
+  if (cohort) q = q.eq("cohort_id", cohort);
+
+  const { data } = await q;
   return data ?? [];
 }
 
 /**
  * Read recent closed-trade memory events (batch mode).
- * For bulk learning sweeps.
+ * Now cohort-aware: defaults to DEFAULT_BRAIN_COHORT.
+ * Pass cohortId=null explicitly to read all cohorts.
  */
 export async function readRecentClosedMemory(
   limit: number,
   sb: ReturnType<typeof createClient>,
+  cohortId?: string | null,
 ): Promise<any[]> {
-  const { data } = await sb
+  const cohort = cohortId === undefined ? DEFAULT_BRAIN_COHORT : cohortId;
+
+  let q = sb
     .from("atlas_memory_events")
-    .select("id,trace_id,position_id,symbol,timeframe,phase,source,payload")
+    .select("id,trace_id,position_id,symbol,timeframe,phase,source,payload,cohort_id,ts")
     .eq("phase", "EXIT_CLOSED")
     .eq("source", "execution")
     .order("ts", { ascending: false })
     .limit(limit);
+
+  if (cohort) q = q.eq("cohort_id", cohort);
+
+  const { data } = await q;
   return data ?? [];
 }
 
 /**
  * Batch load Memory bundles for multiple positions in a single query.
  * Eliminates N+1 problem in brain-update batch mode.
+ * Now cohort-aware.
  *
  * Returns a Map: position_id → { bundle, allIds, events }
  * where bundle is keyed by "PHASE:source".
@@ -134,18 +155,25 @@ export async function readRecentClosedMemory(
 export async function loadMemoryBundleBatch(
   positionIds: string[],
   sb: ReturnType<typeof createClient>,
+  cohortId?: string | null,
 ): Promise<Map<string, { bundle: Record<string, any>; allIds: string[]; events: any[] }>> {
   const result = new Map<string, { bundle: Record<string, any>; allIds: string[]; events: any[] }>();
 
   if (positionIds.length === 0) return result;
 
+  const cohort = cohortId === undefined ? DEFAULT_BRAIN_COHORT : cohortId;
+
   // Step 1: Load ENTRY_FILLED + EXIT_CLOSED by position_id
-  const { data: posEvents, error: posErr } = await sb
+  let posQ = sb
     .from("atlas_memory_events")
-    .select("id,trace_id,position_id,decision_id,symbol,timeframe,phase,source,payload")
+    .select("id,trace_id,position_id,decision_id,symbol,timeframe,phase,source,payload,cohort_id")
     .in("position_id", positionIds)
     .in("phase", ["ENTRY_FILLED", "EXIT_CLOSED"])
     .order("ts", { ascending: true });
+
+  if (cohort) posQ = posQ.eq("cohort_id", cohort);
+
+  const { data: posEvents, error: posErr } = await posQ;
 
   if (posErr) {
     console.error("[brain] Batch memory load (pos) failed:", posErr.message);
@@ -161,12 +189,16 @@ export async function loadMemoryBundleBatch(
 
   let decisionEvents: any[] = [];
   if (decisionIds.length > 0) {
-    const { data: decData, error: decErr } = await sb
+    let decQ = sb
       .from("atlas_memory_events")
-      .select("id,trace_id,position_id,decision_id,symbol,timeframe,phase,source,payload")
+      .select("id,trace_id,position_id,decision_id,symbol,timeframe,phase,source,payload,cohort_id")
       .in("decision_id", decisionIds)
       .eq("phase", "DECISION_EMIT")
       .order("ts", { ascending: true });
+
+    if (cohort) decQ = decQ.eq("cohort_id", cohort);
+
+    const { data: decData, error: decErr } = await decQ;
 
     if (decErr) {
       console.error("[brain] Batch memory load (dec) failed:", decErr.message);

@@ -1856,6 +1856,39 @@ export type Database = {
         }
         Relationships: []
       }
+      market_volatility_rollups: {
+        Row: {
+          atr_1h: number | null
+          atr_4h: number | null
+          rv_1h: number | null
+          rv_24h: number | null
+          rv_4h: number | null
+          symbol: string
+          updated_at: string
+          vol_regime: string | null
+        }
+        Insert: {
+          atr_1h?: number | null
+          atr_4h?: number | null
+          rv_1h?: number | null
+          rv_24h?: number | null
+          rv_4h?: number | null
+          symbol: string
+          updated_at?: string
+          vol_regime?: string | null
+        }
+        Update: {
+          atr_1h?: number | null
+          atr_4h?: number | null
+          rv_1h?: number | null
+          rv_24h?: number | null
+          rv_4h?: number | null
+          symbol?: string
+          updated_at?: string
+          vol_regime?: string | null
+        }
+        Relationships: []
+      }
       maturity_states: {
         Row: {
           asset_id: string
@@ -4550,6 +4583,7 @@ export type Database = {
         Row: {
           chain: string | null
           created_at: string
+          dedupe_key: string | null
           event_time: string
           from_entity: string | null
           id: string
@@ -4565,6 +4599,7 @@ export type Database = {
         Insert: {
           chain?: string | null
           created_at?: string
+          dedupe_key?: string | null
           event_time: string
           from_entity?: string | null
           id?: string
@@ -4580,6 +4615,7 @@ export type Database = {
         Update: {
           chain?: string | null
           created_at?: string
+          dedupe_key?: string | null
           event_time?: string
           from_entity?: string | null
           id?: string
