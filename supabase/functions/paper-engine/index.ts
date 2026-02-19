@@ -5,6 +5,7 @@ import { buildAttributionPayload } from "../_shared/attribution.ts";
 import { defaultEntryTtlMs, isoPlusMs } from "../_shared/closedloop.ts";
 import { newTraceId } from "../_shared/memory.ts";
 import { memoryFanOut, type SourceEvent } from "../_shared/memory_fanout.ts";
+import { computeExecutionP, computeFinalConfidence, clamp } from "../_shared/confidence_calc.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -469,8 +470,70 @@ async function emitDecision(
           if (s.contributed_confidence != null) scenarioWeights[s.scenario_key] = s.contributed_confidence;
         }
 
+        // ── Compute confidence components for canonical payload ──
+        const side = direction === "UP" ? "LONG" : "SHORT";
+        const blueprintId = `baseline_v1:${best.type ?? "neutral"}:${(best.regime ?? "na").toLowerCase()}:${timeframe}:${direction}`;
+
+        // Belief = policyProbability (consensus-adjusted prob)
+        const beliefP = policyProbability;
+        // Quality = scenario reputation (not yet tracked → default 0.5)
+        const qualityQ = 0.5;
+
+        // Execution probability from orderbook
+        let execPResult = { executionP: 0.5, staleBlocked: false, distPct: 0 };
+        let obSpreadBps = 0;
+        let obImbalance: number | null = null;
+        let priceAgeMs = 0;
+        let obAgeMs = 0;
+        let volRegime: string | null = null;
+        {
+          const { data: lp } = await supabase.from("latest_prices").select("price,captured_at").eq("symbol", assetId).maybeSingle();
+          const { data: ob } = await supabase.from("latest_orderbook").select("bid_price,ask_price,spread_bps,imbalance,captured_at").eq("symbol", assetId).maybeSingle();
+          const { data: volRow } = await supabase.from("market_volatility_rollups").select("vol_regime").eq("symbol", assetId).maybeSingle();
+          const now = Date.now();
+          if (lp) priceAgeMs = now - new Date(lp.captured_at).getTime();
+          if (ob) {
+            obAgeMs = now - new Date(ob.captured_at).getTime();
+            obSpreadBps = ob.spread_bps ?? 0;
+            obImbalance = ob.imbalance;
+            const entryMid = (entryZone.priceRange[0] + entryZone.priceRange[1]) / 2;
+            const staleMsExec = 90_000; // 90s
+            execPResult = computeExecutionP({
+              side, entryPrice: entryMid,
+              bid: ob.bid_price, ask: ob.ask_price,
+              spreadBps: obSpreadBps, stalenessMs: obAgeMs, staleMsExec,
+            });
+          }
+          volRegime = volRow?.vol_regime ?? null;
+        }
+
+        const executionP = execPResult.executionP;
+        const finalConfidence = computeFinalConfidence(beliefP, qualityQ, executionP);
+
         const decSources: SourceEvent[] = [
           { source: "consensus", status: "OK", data: {
+            // ── Canonical DECISION_EMIT contract ──
+            strategy_blueprint_id: blueprintId,
+            side,
+            timeframe,
+            belief_p: beliefP,
+            quality_q: qualityQ,
+            execution_p: executionP,
+            final_confidence: finalConfidence,
+            blocked: false, // will be patched after gate
+            decision_reason: isFallback
+              ? `${direction} via consensus authority`
+              : `${direction} signal prob=${probability.toFixed(3)}`,
+            // Market state for debugging longs
+            market_state: {
+              spread_bps: obSpreadBps,
+              price_age_ms: priceAgeMs,
+              ob_age_ms: obAgeMs,
+              stale_for_exec: execPResult.staleBlocked,
+              imbalance: obImbalance,
+              vol_regime: volRegime,
+            },
+            // Legacy + Brain-required fields
             direction, probability, policyProbability,
             consensus_score: context.consensusScore,
             agreement_score: context.agreementScore,
@@ -478,25 +541,19 @@ async function emitDecision(
             scenario_type: best.type,
             consensus_authority: isFallback && consensusAuthority,
             version_tag: VERSION_TAG, horizon,
-            // Brain-required fields (scenario attribution via Memory)
             scenario_keys: scenarioKeys,
             scenario_weights: scenarioWeights,
             regime: best.regime || null,
-            strategy_blueprint_id: `baseline_v1:${best.type ?? "neutral"}:${(best.regime ?? "na").toLowerCase()}:${timeframe}:${direction}`,
             // decision field will be injected after the authoritative gate below
           }},
           { source: "execution", status: "MISSING", reason: "not executed yet" },
         ];
 
-        // Market + orderbook from backbone
-        try {
-          const { data: lp } = await supabase.from("latest_prices").select("price,captured_at").eq("symbol", assetId).maybeSingle();
-          const { data: ob } = await supabase.from("latest_orderbook").select("bid_price,ask_price,spread_bps,imbalance,captured_at").eq("symbol", assetId).maybeSingle();
-          if (lp) decSources.push({ source: "market", status: "OK", data: { price: lp.price, captured_at: lp.captured_at } });
-          else decSources.push({ source: "market", status: "MISSING", reason: "no price data" });
-          if (ob) decSources.push({ source: "orderbook", status: "OK", data: { bid: ob.bid_price, ask: ob.ask_price, spread_bps: ob.spread_bps, imbalance: ob.imbalance } });
-          else decSources.push({ source: "orderbook", status: "MISSING", reason: "no orderbook data" });
-        } catch { decSources.push({ source: "market", status: "FAILED", reason: "backbone read error" }, { source: "orderbook", status: "FAILED", reason: "backbone read error" }); }
+        // Market + orderbook already fetched above for confidence calc — reuse
+        if (priceAgeMs > 0) decSources.push({ source: "market", status: "OK", data: { price: context.currentPrice, price_age_ms: priceAgeMs } });
+        else decSources.push({ source: "market", status: "MISSING", reason: "no price data" });
+        if (obAgeMs > 0) decSources.push({ source: "orderbook", status: "OK", data: { spread_bps: obSpreadBps, imbalance: obImbalance, ob_age_ms: obAgeMs } });
+        else decSources.push({ source: "orderbook", status: "MISSING", reason: "no orderbook data" });
 
         // Derivatives
         try {
@@ -632,10 +689,18 @@ async function emitDecision(
             ? (direction === "UP" ? "ENTER_LONG" : "ENTER_SHORT")
             : "NO_TRADE";
 
-          // Patch consensus source with decision
+          // Patch consensus source with canonical blocked + decision fields
           const consensusSrc = deferredFanout.sources.find((s: SourceEvent) => s.source === "consensus");
           if (consensusSrc && consensusSrc.status === "OK") {
-            (consensusSrc as any).data.decision = {
+            const d = (consensusSrc as any).data;
+            d.blocked = !gateApproved;
+            if (!gateApproved) d.blocked_reason = rejectionReasons.join("; ");
+            d.policy_snapshot = {
+              stale_ms_exec: 90_000,
+              max_spread_bps: policy?.max_spread_bps ?? null,
+              min_confidence: policy?.min_prob ?? 0.35,
+            };
+            d.decision = {
               approved: gateApproved,
               action: gateAction,
               reasons_raw: rejectionReasons,
@@ -654,14 +719,11 @@ async function emitDecision(
                 exposure_open: gateExposure?.open ?? null,
                 exposure_open_nonlegacy: gateExposure?.openNonLegacy ?? null,
                 exposure_pending: gateExposure?.pending ?? null,
-                // Portfolio risk observability
                 portfolio_risk_usd: gateExposure?.portfolioRiskUsd ?? null,
                 new_trade_risk_usd: newTradeRiskUsd,
                 max_portfolio_risk_usd: portfolioRiskCapUsd ?? (VIRTUAL_EQUITY_USD * MAX_PORTFOLIO_RISK_PCT),
-                // Trade sizing observability
                 risk_cap_usd: riskCapUsd,
                 risk_clamped_qty: riskClampedQty,
-                // Hard backstop observability
                 max_open_failsafe: MAX_OPEN_FAILSAFE,
                 virtual_equity: VIRTUAL_EQUITY_USD,
                 max_risk_per_trade_pct: MAX_RISK_PER_TRADE_PCT,
