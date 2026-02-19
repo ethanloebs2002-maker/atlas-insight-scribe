@@ -4,6 +4,8 @@
  * Reads from atlas_memory_events (Memory pillar) — NOT from paper_positions.
  * Logs all updates to atlas_brain_log for provenance.
  *
+ * COLOSSAL PATCH: cohort-aware via updated brain.ts helpers.
+ *
  * BACKBONE SAFE — no external fetches.
  * MEMORY SAFE — reads only.
  * BRAIN COMPLIANT — all learning flows from Memory.
@@ -31,16 +33,17 @@ serve(async (req) => {
   const sb = sbAdmin();
   const body = await req.json().catch(() => ({}));
   const positionId: string | null = body?.position_id ?? null;
+  const cohortId = body?.cohort_id ?? undefined; // undefined = use default cohort
   const brainTrace = newBrainTraceId();
 
   // ── Read from Memory (Brain's ONLY input) ─────────────────────────
   let closedEvents: any[] = [];
 
   if (positionId) {
-    closedEvents = await readMemoryForPosition(positionId, sb);
+    closedEvents = await readMemoryForPosition(positionId, sb, cohortId);
     closedEvents = closedEvents.filter(e => e.phase === "EXIT_CLOSED");
   } else {
-    closedEvents = await readRecentClosedMemory(body?.limit ?? 100, sb);
+    closedEvents = await readRecentClosedMemory(body?.limit ?? 100, sb, cohortId);
   }
 
   if (!closedEvents.length) {

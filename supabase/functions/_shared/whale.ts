@@ -1,3 +1,9 @@
+/**
+ * ATLAS Whale Pillar — Shared Helper
+ *
+ * COLOSSAL PATCH: dedupe_key upsert to prevent duplicate signal insertion.
+ */
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -103,22 +109,33 @@ export function severityFromNotional(notionalUsd: number, minUsd: number) {
   return clamp01(Math.log2(Math.max(1, ratio)) / 2);
 }
 
-// ─── Signal insertion ────────────────────────────────────────────────────
+// ─── Signal insertion (with dedupe) ──────────────────────────────────────
 
 export async function insertSignals(signals: WhaleSignalInsert[]) {
   if (!signals.length) return 0;
   const sb = supabaseAdmin();
 
-  const rows = signals.map((s) => ({
-    ...s,
-    metadata: s.metadata ?? {},
-    chain: s.chain ?? null,
-    observed_price: s.observed_price ?? null,
-    from_entity: s.from_entity ?? null,
-    to_entity: s.to_entity ?? null,
-  }));
+  const rows = signals.map((s) => {
+    const meta = s.metadata ?? {};
+    // Deterministic dedupe key: same symbol/source/type/event_time/notional bucket
+    const dedupe_key = (meta as any)?.dedupe_key
+      ?? `${s.symbol}|${s.source}|${s.signal_type}|${s.event_time}|${Math.round(s.notional_usd)}|${Math.round((s.observed_price ?? 0) * 1e4)}`;
 
-  const { error } = await sb.from("whale_signals_v2").insert(rows);
+    return {
+      ...s,
+      dedupe_key,
+      metadata: meta,
+      chain: s.chain ?? null,
+      observed_price: s.observed_price ?? null,
+      from_entity: s.from_entity ?? null,
+      to_entity: s.to_entity ?? null,
+    };
+  });
+
+  const { error } = await sb.from("whale_signals_v2").upsert(rows, {
+    onConflict: "dedupe_key",
+    ignoreDuplicates: true,
+  });
   if (error) throw new Error(`insertSignals failed: ${error.message}`);
 
   return rows.length;
