@@ -213,8 +213,15 @@ serve(async (req) => {
     }
   }
 
+  // ── Deduplicate upserts (keep last per key, since in-memory accumulates) ──
+  const deduped = new Map<string, any>();
+  for (const u of upserts) {
+    deduped.set(`${u.scenario_key}|${u.symbol}|${u.timeframe}|${u.regime}`, u);
+  }
+  const uniqueUpserts = [...deduped.values()];
+
   // ── Upsert in chunks ──────────────────────────────────────────────
-  for (const group of chunk(upserts, 500)) {
+  for (const group of chunk(uniqueUpserts, 500)) {
     const { error } = await sb.from("scenario_reputation").upsert(group, { onConflict: "scenario_key,symbol,timeframe,regime" });
     if (error) throw new Error(`scenario_reputation upsert failed: ${error.message}`);
   }
