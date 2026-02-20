@@ -9,10 +9,10 @@ import { insertAttributionForPosition } from "../_shared/attribution_insert.ts";
 import { defaultMaxHoldMs } from "../_shared/closedloop.ts";
 import { newTraceId } from "../_shared/memory.ts";
 import { memoryFanOut, type SourceEvent } from "../_shared/memory_fanout.ts";
+import { emitEngineEvent, CANARY_VERSION_TAG } from "../_shared/emit-engine-event.ts";
 
-const DEPLOY_MARK = "paper-engine-tick:canary:v2.0.2";
-const CANARY_VERSION_TAG = "v2.0.2-canary";
-const CANARY_EMITTER_TAG = "paper-engine-tick v2.0.2-canary";
+const DEPLOY_MARK = "paper-engine-tick:canary:v2.0.3";
+const CANARY_EMITTER_TAG = "paper-engine-tick v2.0.3-canary";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -86,33 +86,16 @@ class PaperEngineCore {
     eventType: string,
     payload: Record<string, unknown>,
   ) {
-    try {
-      // ── Build final payload: spread caller keys, append candle_ts + __emitter canary stamp.
-      // Use JSON round-trip to convert undefined → null so no keys are silently dropped.
-      const rawPayload = { ...payload, candle_ts: this.candle.ts, __emitter: CANARY_EMITTER_TAG };
-      const finalPayload: Record<string, unknown> = JSON.parse(
-        JSON.stringify(rawPayload, (_k, v) => (v === undefined ? null : v))
-      );
-
-      // ── CANARY DEBUG (telemetry-only): log key presence for POSITION_CLOSED
-      if (eventType === "POSITION_CLOSED") {
-        console.log(`[CANARY ${CANARY_EMITTER_TAG}] POSITION_CLOSED payload keys:`, Object.keys(finalPayload));
-        console.log(`[CANARY ${CANARY_EMITTER_TAG}] has decision_id key:`, Object.prototype.hasOwnProperty.call(finalPayload, "decision_id"));
-        console.log(`[CANARY ${CANARY_EMITTER_TAG}] position_id =`, finalPayload["position_id"], "| decision_id =", finalPayload["decision_id"]);
-      }
-
-      await this.sb.from("paper_engine_events").insert({
-        run_id: this.runId,
-        entity_type: entityType,
-        entity_id: entityId,
-        event_type: eventType,
-        version_tag: CANARY_VERSION_TAG,  // hardcoded canary — overrides policy.version_tag
-        ts: new Date().toISOString(),
-        payload: finalPayload,
-      });
-    } catch (e) {
-      console.error("emit failed:", eventType, e);
-    }
+    // Append candle_ts before delegating to the canonical shared emitter.
+    await emitEngineEvent(
+      this.sb,
+      CANARY_EMITTER_TAG,
+      this.runId,
+      entityType,
+      entityId,
+      eventType,
+      { ...payload, candle_ts: this.candle.ts },
+    );
   }
 
   // ─── Stage 0: Tick bookends ──────────────────────────────────────────
