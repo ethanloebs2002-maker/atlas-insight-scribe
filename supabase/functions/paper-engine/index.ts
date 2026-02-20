@@ -754,23 +754,34 @@ async function emitDecision(
           }
 
           // ── CONTRACT ENFORCER: hard-guard before fan-out ───────────────────
-          // Ensures canonical fields are always present regardless of code path.
-          // This is a failsafe; canonical fields should be set at build time above.
+          // UNCONDITIONAL: derives all canonical fields regardless of build path.
+          // Derives direction from every possible source to prevent null cascades.
           {
             const cs = deferredFanout.sources.find((s: SourceEvent) => s.source === "consensus" && s.status === "OK");
             if (cs) {
               const d = (cs as any).data;
-              // direction_pred: canonical alias for direction
-              if (!d.direction_pred && d.direction) d.direction_pred = String(d.direction).toUpperCase();
-              // side: must always be set for directional decisions
-              if (!d.side && d.direction) {
-                const dir = String(d.direction).toUpperCase();
+
+              // Resolve direction from any available source (priority order)
+              const rawDir: string =
+                d.direction ||
+                (d.direction_pred ? (d.direction_pred === "DOWN" ? "DOWN" : d.direction_pred === "UP" ? "UP" : null) : null) ||
+                (d.side === "SHORT" ? "DOWN" : d.side === "LONG" ? "UP" : null) ||
+                "NEUTRAL";
+              const dir = String(rawDir).toUpperCase();
+
+              // direction_pred: always set
+              if (!d.direction_pred) d.direction_pred = dir;
+
+              // side: always set
+              if (!d.side) {
                 d.side = dir === "UP" ? "LONG" : dir === "DOWN" ? "SHORT" : "NEUTRAL";
               }
-              // decision_type: must never be null on OK events
+
+              // decision_type: always set on OK events
               if (!d.decision_type) {
                 d.decision_type = (d.side === "LONG" || d.side === "SHORT") ? "TRADE_CANDIDATE" : "NO_TRADE";
               }
+
               // blocked: must be boolean
               if (d.blocked === null || d.blocked === undefined) d.blocked = false;
             }
