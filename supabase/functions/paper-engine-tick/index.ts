@@ -814,8 +814,10 @@ class PaperEngineCore {
     }
 
     await this.emit("POSITION", posId, "POSITION_CLOSED", {
+      decision_id: pos.decision_id ?? null,
       exit_price: exitPrice,
       close_reason: reason,
+      outcome,
       realized_pnl: pnl,
       realized_r: realizedR,
       outcome_label: outcomeLabel,
