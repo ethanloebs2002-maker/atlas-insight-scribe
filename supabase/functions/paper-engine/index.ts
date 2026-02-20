@@ -844,6 +844,21 @@ async function emitDecision(
             volRegimeEntry = mctx?.vol_regime ?? "unknown";
           }
 
+          // ── Pre-cancel any existing PENDING_ENTRY for this duplicate_key
+          //    BEFORE inserting new variants, so they don't consume pending slots
+          await cancelDuplicatePositions(duplicateKey);
+
+          // Idempotency: skip if a position already exists for this decision
+          const { data: existingForDecision } = await supabase
+            .from("paper_positions")
+            .select("id")
+            .eq("decision_id", decision.data.id)
+            .limit(1);
+          if (existingForDecision && existingForDecision.length > 0) {
+            console.log("[paper-engine] position already exists for decision", decision.data.id, "— skipping insert");
+            // still update decision status
+            await supabase.from("paper_decisions").update({ engine_status: "EXECUTING" }).eq("id", decision.data.id);
+          } else {
           // Create position for each variant (first variant is primary)
           let primaryPosition: any = null;
           for (let vi = 0; vi < variants.length; vi++) {
@@ -884,7 +899,6 @@ async function emitDecision(
             if (entryOrder) {
               await supabase.from("paper_positions").update({ entry_order_id: entryOrder.id }).eq("id", position.id);
             }
-            await cancelDuplicatePositions(duplicateKey, position.id);
             await supabase.from("paper_decisions").update({ engine_status: "EXECUTING" }).eq("id", decision.data.id);
             await emitEvent(runId, "POSITION", position.id, "POSITION_CREATED", { symbol: assetId, side, policyProbability, consensusAuthorityUsed: isFallback && consensusAuthority });
             if (entryOrder) await emitEvent(runId, "ORDER", entryOrder.id, "ORDER_PLACED", { type: "ENTRY", limit_price: limitPrice });
@@ -916,6 +930,7 @@ async function emitDecision(
               }).eq("id", decision.data!.id);
             } catch (e) { console.warn("[scenario-attribution] insert failed:", (e as Error).message); }
           }
+          } // end idempotency else
         }
       }
 

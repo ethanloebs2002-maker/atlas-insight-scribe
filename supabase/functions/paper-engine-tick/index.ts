@@ -952,11 +952,11 @@ class PaperEngineCore {
       if (pos.status === "OPEN") {
         await this.closePosition(pos.id, this.candle.close, "EXPIRY");
       } else {
-        // Cancel unfilled entry
+        // Cancel unfilled entry — use EXPIRED status (aligned with processExecution path)
         await this.sb
           .from("paper_positions")
           .update({
-            status: "CANCELED",
+            status: "EXPIRED",
             close_reason: "EXPIRED_ENTRY",
             closed_at: this.candle.ts,
             expired_at: this.candle.ts,
@@ -965,7 +965,8 @@ class PaperEngineCore {
             outcome: "EXPIRED",
             outcome_reason: "ENTRY_NOT_TOUCHED",
           })
-          .eq("id", pos.id);
+          .eq("id", pos.id)
+          .eq("status", "PENDING_ENTRY"); // guard: only expire if still pending
 
         // Cancel entry order
         if (pos.entry_order_id) {
@@ -992,6 +993,44 @@ class PaperEngineCore {
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${svcKey}` },
           body: JSON.stringify({ position_id: pos.id, outcome_type: "EXPIRED_NO_FILL" }),
         }).catch(e => console.warn("[expiry] reputation update failed:", e.message));
+
+        // ── Memory: ENTRY_EXPIRED fan-out via EXIT_CLOSED phase ──
+        // (PENDING_ENTRY positions that never filled still need a terminal memory record
+        //  so the Brain has full lifecycle coverage and no silent gaps)
+        try {
+          const expTraceId = newTraceId();
+          const expCommon = {
+            position_id: pos.id,
+            decision_id: pos.decision_id ?? undefined,
+            symbol: pos.symbol ?? this.symbol,
+            timeframe: pos.timeframe ?? this.timeframe,
+          };
+          const expSources: SourceEvent[] = [
+            { source: "execution", status: "OK", data: {
+              close_reason: "EXPIRED_ENTRY",
+              outcome: "EXPIRED",
+              outcome_reason: "ENTRY_NOT_TOUCHED",
+              realized_pnl: 0,
+              realized_r: 0,
+              expires_at: pos.expires_at,
+              candle_ts: this.candle.ts,
+            }},
+            { source: "consensus", status: "OK", data: {
+              initial_probability: pos.initial_probability_pred,
+              side: pos.side,
+            }},
+            { source: "market", status: "MISSING", reason: "not sampled at entry expiry" },
+            { source: "orderbook", status: "MISSING", reason: "not sampled at entry expiry" },
+            { source: "derivatives", status: "MISSING", reason: "not sampled at entry expiry" },
+            { source: "policy", status: "MISSING", reason: "not sampled at entry expiry" },
+            { source: "risk_lab", status: "MISSING", reason: "no fill — risk not realized" },
+            // whale, news, strategy auto-fill as MISSING via fan-out
+          ];
+          await memoryFanOut(this.sb, "EXIT_CLOSED", expTraceId, expCommon, expSources);
+          console.log("[MEMORY] EXIT_CLOSED (EXPIRED_ENTRY) emitted for position", pos.id);
+        } catch (e: any) {
+          console.error("[MEMORY] EXIT_CLOSED (EXPIRED_ENTRY) fanout FAILED", pos.id, e.message);
+        }
 
         // Mark decision terminal
         if (pos.decision_id) {
