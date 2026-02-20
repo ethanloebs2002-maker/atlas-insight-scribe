@@ -514,13 +514,16 @@ async function emitDecision(
           { source: "consensus", status: "OK", data: {
             // ── Canonical DECISION_EMIT contract ──
             strategy_blueprint_id: blueprintId,
-            side,
+            side,                                                    // LONG | SHORT
+            direction_pred: direction,                               // UP | DOWN (canonical alias)
+            decision_type: "TRADE_CANDIDATE",                       // always set at build time
+            blocked: false,                                          // will be patched after gate
+            blocked_reason: null,                                    // will be patched after gate
             timeframe,
             belief_p: beliefP,
             quality_q: qualityQ,
             execution_p: executionP,
             final_confidence: finalConfidence,
-            blocked: false, // will be patched after gate
             decision_reason: isFallback
               ? `${direction} via consensus authority`
               : `${direction} signal prob=${probability.toFixed(3)}`,
@@ -747,6 +750,29 @@ async function emitDecision(
             } else {
               policySrc.status = "MISSING";
               (policySrc as any).reason = "no active policy";
+            }
+          }
+
+          // ── CONTRACT ENFORCER: hard-guard before fan-out ───────────────────
+          // Ensures canonical fields are always present regardless of code path.
+          // This is a failsafe; canonical fields should be set at build time above.
+          {
+            const cs = deferredFanout.sources.find((s: SourceEvent) => s.source === "consensus" && s.status === "OK");
+            if (cs) {
+              const d = (cs as any).data;
+              // direction_pred: canonical alias for direction
+              if (!d.direction_pred && d.direction) d.direction_pred = String(d.direction).toUpperCase();
+              // side: must always be set for directional decisions
+              if (!d.side && d.direction) {
+                const dir = String(d.direction).toUpperCase();
+                d.side = dir === "UP" ? "LONG" : dir === "DOWN" ? "SHORT" : "NEUTRAL";
+              }
+              // decision_type: must never be null on OK events
+              if (!d.decision_type) {
+                d.decision_type = (d.side === "LONG" || d.side === "SHORT") ? "TRADE_CANDIDATE" : "NO_TRADE";
+              }
+              // blocked: must be boolean
+              if (d.blocked === null || d.blocked === undefined) d.blocked = false;
             }
           }
 
