@@ -3140,7 +3140,7 @@ export type Database = {
           {
             foreignKeyName: "paper_positions_decision_id_fkey"
             columns: ["decision_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "paper_decisions"
             referencedColumns: ["id"]
           },
@@ -5016,7 +5016,7 @@ export type Database = {
           {
             foreignKeyName: "paper_positions_decision_id_fkey"
             columns: ["decision_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "paper_decisions"
             referencedColumns: ["id"]
           },
@@ -5144,7 +5144,7 @@ export type Database = {
           {
             foreignKeyName: "paper_positions_decision_id_fkey"
             columns: ["decision_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "paper_decisions"
             referencedColumns: ["id"]
           },
