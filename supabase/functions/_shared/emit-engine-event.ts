@@ -12,50 +12,97 @@
  *   - Coerces undefined → null to prevent silent key-drops in JSONB.
  */
 
-import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-
 // ── Canary constants (bump these to verify deployment) ────────────────────────
-export const CANARY_VERSION_TAG = "v2.0.3-canary";
+export const CANARY_VERSION_TAG = "v2.0.4-canary";
 
 /**
  * emitEngineEvent — canonical paper_engine_events writer.
  *
  * @param sb            Supabase client (service role)
- * @param emitterTag    e.g. "paper-engine v2.0.3-canary" — identifies the fn
+ * @param emitterTag    e.g. "paper-engine v2.0.4-canary" — identifies the fn
  * @param runId         run_id (nullable)
  * @param entityType    e.g. "POSITION", "ORDER", "DECISION", "ENGINE"
  * @param entityId      entity primary-key (nullable)
  * @param eventType     e.g. "POSITION_CLOSED"
- * @param payload       caller payload — position_id/decision_id must be included by caller for relevant events
+ * @param payload       caller payload
  */
 export async function emitEngineEvent(
-  sb: SupabaseClient,
+  sb: any,
   emitterTag: string,
   runId: string | null,
   entityType: string,
   entityId: string | null,
   eventType: string,
-  payload: Record<string, unknown> = {},
+  payload: Record<string, any> = {},
 ): Promise<void> {
   try {
-    // Stamp __emitter + coerce undefined → null (prevents silent JSONB key drops)
+    // Stamp + coerce undefined → null (prevents silent JSONB key drops)
     const rawPayload = { ...payload, __emitter: emitterTag };
-    const finalPayload: Record<string, unknown> = JSON.parse(
+    const finalPayload: Record<string, any> = JSON.parse(
       JSON.stringify(rawPayload, (_k, v) => (v === undefined ? null : v)),
     );
 
-    // ── CANARY DEBUG: log key presence for POSITION_CLOSED only ──────────────
-    if (eventType === "POSITION_CLOSED") {
-      console.log(`[CANARY ${emitterTag}] POSITION_CLOSED payload keys:`, Object.keys(finalPayload));
+    // ─────────────────────────────────────────────────────────────
+    // Canonical ID stamping (telemetry-only)
+    // Goal: event payload ALWAYS carries decision_id / position_id when inferable
+    // ─────────────────────────────────────────────────────────────
+
+    const hasKey = (k: string) => Object.prototype.hasOwnProperty.call(finalPayload, k);
+
+    // 1) DECISION_* events: decision_id should be entity_id
+    if (entityType === "DECISION" && entityId && !hasKey("decision_id")) {
+      finalPayload.decision_id = entityId;
+    }
+
+    // 2) POSITION_* events: position_id should be entity_id
+    if (entityType === "POSITION" && entityId && !hasKey("position_id")) {
+      finalPayload.position_id = entityId;
+    }
+
+    // 3) ORDER_* events: try to infer position_id from paper_orders.position_id
+    //    (entityId is the order id in paper_orders)
+    if (entityType === "ORDER" && entityId && !hasKey("position_id")) {
+      const { data: ord, error: ordErr } = await sb
+        .from("paper_orders")
+        .select("position_id")
+        .eq("id", entityId)
+        .maybeSingle();
+
+      if (!ordErr && ord?.position_id) {
+        finalPayload.position_id = ord.position_id;
+      }
+    }
+
+    // 4) If we have a position_id but no decision_id, infer via paper_positions.decision_id
+    if (hasKey("position_id") && finalPayload.position_id && !hasKey("decision_id")) {
+      const { data: pos, error: posErr } = await sb
+        .from("paper_positions")
+        .select("decision_id")
+        .eq("id", finalPayload.position_id)
+        .maybeSingle();
+
+      if (!posErr && pos?.decision_id) {
+        finalPayload.decision_id = pos.decision_id;
+      }
+    }
+
+    // (Optional) If we have decision_id but no position_id for POSITION events, we don't backfill the reverse.
+    // Reverse lookup is ambiguous / expensive without an index; keep it one-way.
+
+    // ── CANARY DEBUG: log for key event types only (safe, low volume) ─────────
+    if (
+      eventType === "POSITION_CLOSED" ||
+      eventType === "ORDER_PLACED" ||
+      eventType === "POSITION_CREATED" ||
+      eventType === "DECISION_EMITTED"
+    ) {
       console.log(
-        `[CANARY ${emitterTag}] has position_id:`,
-        Object.prototype.hasOwnProperty.call(finalPayload, "position_id"),
-        "| has decision_id:",
-        Object.prototype.hasOwnProperty.call(finalPayload, "decision_id"),
-      );
-      console.log(
-        `[CANARY ${emitterTag}] position_id =`, finalPayload["position_id"],
-        "| decision_id =", finalPayload["decision_id"],
+        `[CANARY ${emitterTag}] ${eventType} keys:`,
+        Object.keys(finalPayload),
+        "| position_id:",
+        finalPayload.position_id ?? null,
+        "| decision_id:",
+        finalPayload.decision_id ?? null,
       );
     }
 
@@ -64,12 +111,15 @@ export async function emitEngineEvent(
       entity_type: entityType,
       entity_id: entityId,
       event_type: eventType,
-      version_tag: CANARY_VERSION_TAG,   // hardcoded — proves this code path ran
+      version_tag: "v2.0.4-canary", // bump so we can verify this exact patch
       ts: new Date().toISOString(),
       payload: finalPayload,
     });
   } catch (e) {
     // Non-critical telemetry — never let emit failure propagate to engine logic
-    console.error(`[emitEngineEvent] FAILED to emit ${eventType}:`, (e as Error)?.message ?? e);
+    console.error(
+      `[emitEngineEvent] FAILED to emit ${eventType}:`,
+      (e as Error)?.message ?? e,
+    );
   }
 }
