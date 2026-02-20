@@ -1184,20 +1184,36 @@ class PaperEngineCore {
   // ─── Stage 9: Invariant checks ──────────────────────────────────────
 
   async checkInvariants() {
-    const { data: openPos } = await this.sb
+    // Exposure set: filled (OPEN) positions only — closed_at IS NULL AND filled_at IS NOT NULL
+    const { data: exposurePos } = await this.sb
+      .from("paper_positions")
+      .select("side, filled_at, closed_at")
+      .eq("symbol", this.symbol)
+      .is("closed_at", null)
+      .not("filled_at", "is", null);
+
+    // Pending set: not yet filled — closed_at IS NULL AND filled_at IS NULL AND status='PENDING_ENTRY'
+    // Included for observability only; does NOT drive the invariant.
+    const { data: pendingPos } = await this.sb
       .from("paper_positions")
       .select("side")
       .eq("symbol", this.symbol)
-      .eq("status", "OPEN");
+      .is("closed_at", null)
+      .is("filled_at", null)
+      .eq("status", "PENDING_ENTRY");
 
-    if (openPos?.length) {
-      const sides = new Set(openPos.map((p: any) => p.side));
-      if (sides.has("LONG") && sides.has("SHORT")) {
-        await this.emit("ENGINE", null, "INVARIANT_VIOLATION", {
-          violation: "SIMULTANEOUS_LONG_SHORT",
-          symbol: this.symbol,
-        });
-      }
+    const exposureSides = new Set((exposurePos ?? []).map((p: any) => p.side));
+    const pendingCount = (pendingPos ?? []).length;
+    const exposureCount = (exposurePos ?? []).length;
+
+    // Invariant: exposure set must never hold both sides simultaneously
+    if (exposureSides.has("LONG") && exposureSides.has("SHORT")) {
+      await this.emit("ENGINE", null, "INVARIANT_VIOLATION", {
+        violation: "SIMULTANEOUS_FILLED_LONG_SHORT",
+        symbol: this.symbol,
+        exposure_count: exposureCount,
+        pending_count: pendingCount,
+      });
     }
   }
 }
