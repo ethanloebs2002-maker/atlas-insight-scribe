@@ -85,6 +85,20 @@ class PaperEngineCore {
     payload: Record<string, unknown>,
   ) {
     try {
+      // ── Build final payload: spread caller keys, append candle_ts.
+      // Use JSON round-trip to convert undefined → null so no keys are silently dropped.
+      const rawPayload = { ...payload, candle_ts: this.candle.ts };
+      const finalPayload: Record<string, unknown> = JSON.parse(
+        JSON.stringify(rawPayload, (_k, v) => (v === undefined ? null : v))
+      );
+
+      // ── DEBUG (telemetry-only): log key presence for POSITION_CLOSED
+      if (eventType === "POSITION_CLOSED") {
+        console.log("[EMIT_DEBUG] POSITION_CLOSED payload keys:", Object.keys(finalPayload));
+        console.log("[EMIT_DEBUG] has decision_id key:", Object.prototype.hasOwnProperty.call(finalPayload, "decision_id"));
+        console.log("[EMIT_DEBUG] position_id =", finalPayload["position_id"], "| decision_id =", finalPayload["decision_id"]);
+      }
+
       await this.sb.from("paper_engine_events").insert({
         run_id: this.runId,
         entity_type: entityType,
@@ -92,7 +106,7 @@ class PaperEngineCore {
         event_type: eventType,
         version_tag: this.policy.version_tag,
         ts: new Date().toISOString(),
-        payload: { ...payload, candle_ts: this.candle.ts },
+        payload: finalPayload,
       });
     } catch (e) {
       console.error("emit failed:", eventType, e);
