@@ -1184,16 +1184,18 @@ class PaperEngineCore {
   // ─── Stage 9: Invariant checks ──────────────────────────────────────
 
   async checkInvariants() {
-    // Exposure set: filled (OPEN) positions only — closed_at IS NULL AND filled_at IS NOT NULL
+    // ── Exposure set ────────────────────────────────────────────────────────
+    // Only filled, unclosed positions count as "live exposure".
+    // Strictly: closed_at IS NULL AND filled_at IS NOT NULL.
+    // PENDING_ENTRY (filled_at IS NULL) is excluded from the invariant.
     const { data: exposurePos } = await this.sb
       .from("paper_positions")
-      .select("side, filled_at, closed_at")
+      .select("side, cohort_id, timeframe")
       .eq("symbol", this.symbol)
       .is("closed_at", null)
-      .not("filled_at", "is", null);
+      .not("filled_at", "is", null);   // filled_at IS NOT NULL
 
-    // Pending set: not yet filled — closed_at IS NULL AND filled_at IS NULL AND status='PENDING_ENTRY'
-    // Included for observability only; does NOT drive the invariant.
+    // ── Pending set (observability only — does NOT drive the invariant) ──────
     const { data: pendingPos } = await this.sb
       .from("paper_positions")
       .select("side")
@@ -1202,18 +1204,38 @@ class PaperEngineCore {
       .is("filled_at", null)
       .eq("status", "PENDING_ENTRY");
 
-    const exposureSides = new Set((exposurePos ?? []).map((p: any) => p.side));
     const pendingCount = (pendingPos ?? []).length;
-    const exposureCount = (exposurePos ?? []).length;
 
-    // Invariant: exposure set must never hold both sides simultaneously
-    if (exposureSides.has("LONG") && exposureSides.has("SHORT")) {
-      await this.emit("ENGINE", null, "INVARIANT_VIOLATION", {
-        violation: "SIMULTANEOUS_FILLED_LONG_SHORT",
-        symbol: this.symbol,
-        exposure_count: exposureCount,
-        pending_count: pendingCount,
-      });
+    // ── Group exposure by (cohort_id, symbol, timeframe) ─────────────────────
+    // This lets us detect violations per-cohort/timeframe slice, not globally.
+    type ExposureKey = string; // `${cohort_id}|${symbol}|${timeframe}`
+    const grouped = new Map<ExposureKey, Set<string>>();
+
+    for (const p of exposurePos ?? []) {
+      const key: ExposureKey = `${p.cohort_id ?? ""}|${this.symbol}|${p.timeframe ?? this.timeframe}`;
+      if (!grouped.has(key)) grouped.set(key, new Set());
+      grouped.get(key)!.add(p.side);
+    }
+
+    // ── Check invariant per group ─────────────────────────────────────────────
+    for (const [key, sides] of grouped.entries()) {
+      if (sides.has("LONG") && sides.has("SHORT")) {
+        const [cohort_id, , timeframe] = key.split("|");
+        const exposureCount = (exposurePos ?? []).filter(
+          (p: any) =>
+            (p.cohort_id ?? "") === cohort_id &&
+            (p.timeframe ?? this.timeframe) === timeframe,
+        ).length;
+
+        await this.emit("ENGINE", null, "INVARIANT_VIOLATION", {
+          violation: "SIMULTANEOUS_FILLED_LONG_SHORT",
+          symbol: this.symbol,
+          cohort_id: cohort_id || null,
+          timeframe,
+          exposure_count: exposureCount,
+          pending_count: pendingCount,
+        });
+      }
     }
   }
 }
