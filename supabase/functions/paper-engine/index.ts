@@ -6,6 +6,7 @@ import { defaultEntryTtlMs, isoPlusMs } from "../_shared/closedloop.ts";
 import { newTraceId } from "../_shared/memory.ts";
 import { memoryFanOut, type SourceEvent } from "../_shared/memory_fanout.ts";
 import { computeExecutionP, computeFinalConfidence, clamp } from "../_shared/confidence_calc.ts";
+import { emitEngineEvent, CANARY_VERSION_TAG } from "../_shared/emit-engine-event.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,8 +18,9 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const VERSION_TAG = "v2.0.2-canary";
-const EMITTER_TAG = "paper-engine v2.0.2-canary";
+// VERSION_TAG is now sourced from the shared emitter (CANARY_VERSION_TAG = "v2.0.3-canary")
+const VERSION_TAG = CANARY_VERSION_TAG;
+const EMITTER_TAG = "paper-engine v2.0.3-canary";
 
 // ─── RISK CAP CONSTANTS ─────────────────────────────────────────
 const VIRTUAL_EQUITY_USD = 100_000;
@@ -97,25 +99,15 @@ const TF_MS: Record<string, number> = {
   "1h": 3_600_000, "4h": 14_400_000, "8h": 28_800_000, "1d": 86_400_000,
 };
 
-async function emitEvent(runId: string | null, entityType: string, entityId: string | null, eventType: string, payload: any = {}) {
-  try {
-    // Coerce undefined → null so no keys are silently dropped by JSON serialisation
-    // Stamp __emitter so we can prove which deployed code path fired
-    const rawPayload = { ...payload, __emitter: EMITTER_TAG };
-    const finalPayload: Record<string, unknown> = JSON.parse(
-      JSON.stringify(rawPayload, (_k, v) => (v === undefined ? null : v))
-    );
-    // ── CANARY DEBUG (telemetry-only): log key presence for POSITION_CLOSED
-    if (eventType === "POSITION_CLOSED") {
-      console.log(`[CANARY ${EMITTER_TAG}] POSITION_CLOSED payload keys:`, Object.keys(finalPayload));
-      console.log(`[CANARY ${EMITTER_TAG}] has position_id:`, Object.prototype.hasOwnProperty.call(finalPayload, "position_id"), "| has decision_id:", Object.prototype.hasOwnProperty.call(finalPayload, "decision_id"));
-      console.log(`[CANARY ${EMITTER_TAG}] position_id =`, finalPayload["position_id"], "| decision_id =", finalPayload["decision_id"]);
-    }
-    await supabase.from("paper_engine_events").insert({
-      run_id: runId, entity_type: entityType, entity_id: entityId,
-      event_type: eventType, version_tag: VERSION_TAG, payload: finalPayload,
-    });
-  } catch { /* non-critical */ }
+/** Thin wrapper — delegates entirely to the canonical shared emitter. */
+async function emitEvent(
+  runId: string | null,
+  entityType: string,
+  entityId: string | null,
+  eventType: string,
+  payload: Record<string, unknown> = {},
+): Promise<void> {
+  await emitEngineEvent(supabase, EMITTER_TAG, runId, entityType, entityId, eventType, payload);
 }
 
 // ─── CONTEXT SNAPSHOT HELPERS ────────────────────────────────────
