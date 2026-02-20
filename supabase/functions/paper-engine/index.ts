@@ -17,7 +17,7 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const VERSION_TAG = "v2.0.0";
+const VERSION_TAG = "v2.0.1";
 
 // ─── RISK CAP CONSTANTS ─────────────────────────────────────────
 const VIRTUAL_EQUITY_USD = 100_000;
@@ -98,9 +98,19 @@ const TF_MS: Record<string, number> = {
 
 async function emitEvent(runId: string | null, entityType: string, entityId: string | null, eventType: string, payload: any = {}) {
   try {
+    // Coerce undefined → null so no keys are silently dropped by JSON serialisation
+    const finalPayload: Record<string, unknown> = JSON.parse(
+      JSON.stringify(payload, (_k, v) => (v === undefined ? null : v))
+    );
+    // ── DEBUG (telemetry-only): log key presence for POSITION_CLOSED
+    if (eventType === "POSITION_CLOSED") {
+      console.log("[EMIT_DEBUG v2.0.1] POSITION_CLOSED payload keys:", Object.keys(finalPayload));
+      console.log("[EMIT_DEBUG v2.0.1] has position_id:", Object.prototype.hasOwnProperty.call(finalPayload, "position_id"), "| has decision_id:", Object.prototype.hasOwnProperty.call(finalPayload, "decision_id"));
+      console.log("[EMIT_DEBUG v2.0.1] position_id =", finalPayload["position_id"], "| decision_id =", finalPayload["decision_id"]);
+    }
     await supabase.from("paper_engine_events").insert({
       run_id: runId, entity_type: entityType, entity_id: entityId,
-      event_type: eventType, version_tag: VERSION_TAG, payload,
+      event_type: eventType, version_tag: VERSION_TAG, payload: finalPayload,
     });
   } catch { /* non-critical */ }
 }
@@ -1176,7 +1186,16 @@ async function processExecution(assetId: string) {
 
     closed++;
     await emitEvent(pos.run_id, "POSITION", pos.id, "POSITION_CLOSED", {
-      close_reason: closeReason, exit_price: effectiveExit, realized_pnl: pnl, realized_r: realizedR, outcome,
+      position_id: pos.id,
+      decision_id: pos.decision_id ?? null,
+      symbol: pos.symbol ?? null,
+      timeframe: pos.timeframe ?? null,
+      side: pos.side ?? null,
+      close_reason: closeReason,
+      exit_price: effectiveExit,
+      realized_pnl: pnl,
+      realized_r: realizedR,
+      outcome,
     });
 
     // ── Risk Lab: update performance on close ──
