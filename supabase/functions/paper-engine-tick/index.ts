@@ -1184,18 +1184,20 @@ class PaperEngineCore {
   // ─── Stage 9: Invariant checks ──────────────────────────────────────
 
   async checkInvariants() {
-    // ── Exposure set ────────────────────────────────────────────────────────
-    // Only filled, unclosed positions count as "live exposure".
-    // Strictly: closed_at IS NULL AND filled_at IS NOT NULL.
-    // PENDING_ENTRY (filled_at IS NULL) is excluded from the invariant.
+    // ── Exposure set ─────────────────────────────────────────────────────────
+    // Definition: closed_at IS NULL AND filled_at IS NOT NULL AND status = 'OPEN'
+    // This is the canonical "live exposure" definition.
+    // PENDING_ENTRY positions (filled_at IS NULL) are strictly excluded.
     const { data: exposurePos } = await this.sb
       .from("paper_positions")
       .select("side, cohort_id, timeframe")
       .eq("symbol", this.symbol)
-      .is("closed_at", null)
-      .not("filled_at", "is", null);   // filled_at IS NOT NULL
+      .eq("status", "OPEN")          // canonical: must be OPEN
+      .is("closed_at", null)         // closed_at IS NULL
+      .not("filled_at", "is", null); // filled_at IS NOT NULL
 
     // ── Pending set (observability only — does NOT drive the invariant) ──────
+    // Fetched per side so the violation payload carries pending_long / pending_short.
     const { data: pendingPos } = await this.sb
       .from("paper_positions")
       .select("side")
@@ -1204,36 +1206,42 @@ class PaperEngineCore {
       .is("filled_at", null)
       .eq("status", "PENDING_ENTRY");
 
-    const pendingCount = (pendingPos ?? []).length;
+    const pendingLong  = (pendingPos ?? []).filter((p: any) => p.side === "LONG").length;
+    const pendingShort = (pendingPos ?? []).filter((p: any) => p.side === "SHORT").length;
 
     // ── Group exposure by (cohort_id, symbol, timeframe) ─────────────────────
-    // This lets us detect violations per-cohort/timeframe slice, not globally.
+    // Invariant is evaluated per-slice to avoid cross-cohort / cross-timeframe
+    // false positives. timeframe always falls back to this.timeframe when null.
     type ExposureKey = string; // `${cohort_id}|${symbol}|${timeframe}`
-    const grouped = new Map<ExposureKey, Set<string>>();
+    type SideCounts  = { long: number; short: number };
+    const grouped = new Map<ExposureKey, SideCounts>();
 
     for (const p of exposurePos ?? []) {
-      const key: ExposureKey = `${p.cohort_id ?? ""}|${this.symbol}|${p.timeframe ?? this.timeframe}`;
-      if (!grouped.has(key)) grouped.set(key, new Set());
-      grouped.get(key)!.add(p.side);
+      const cohortId  = p.cohort_id  ?? "";
+      const timeframe = p.timeframe  ?? this.timeframe; // never null in key
+      const key: ExposureKey = `${cohortId}|${this.symbol}|${timeframe}`;
+      if (!grouped.has(key)) grouped.set(key, { long: 0, short: 0 });
+      const counts = grouped.get(key)!;
+      if (p.side === "LONG")  counts.long++;
+      if (p.side === "SHORT") counts.short++;
     }
 
-    // ── Check invariant per group ─────────────────────────────────────────────
-    for (const [key, sides] of grouped.entries()) {
-      if (sides.has("LONG") && sides.has("SHORT")) {
-        const [cohort_id, , timeframe] = key.split("|");
-        const exposureCount = (exposurePos ?? []).filter(
-          (p: any) =>
-            (p.cohort_id ?? "") === cohort_id &&
-            (p.timeframe ?? this.timeframe) === timeframe,
-        ).length;
+    // ── Check invariant per (cohort_id, symbol, timeframe) slice ────────────
+    // Only filled-exposure (OPEN status) on both sides triggers a violation.
+    // Pending-opposite-side blocking is a POLICY_BLOCKED concern, not invariant.
+    for (const [key, counts] of grouped.entries()) {
+      if (counts.long > 0 && counts.short > 0) {
+        const [cohortId, , timeframe] = key.split("|");
 
         await this.emit("ENGINE", null, "INVARIANT_VIOLATION", {
-          violation: "SIMULTANEOUS_FILLED_LONG_SHORT",
-          symbol: this.symbol,
-          cohort_id: cohort_id || null,
-          timeframe,
-          exposure_count: exposureCount,
-          pending_count: pendingCount,
+          violation:     "SIMULTANEOUS_FILLED_LONG_SHORT",
+          symbol:        this.symbol,
+          timeframe:     timeframe || this.timeframe,
+          cohort_id:     cohortId  || null,
+          filled_long:   counts.long,
+          filled_short:  counts.short,
+          pending_long:  pendingLong,
+          pending_short: pendingShort,
         });
       }
     }
