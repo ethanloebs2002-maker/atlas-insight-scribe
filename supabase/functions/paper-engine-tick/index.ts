@@ -10,7 +10,9 @@ import { defaultMaxHoldMs } from "../_shared/closedloop.ts";
 import { newTraceId } from "../_shared/memory.ts";
 import { memoryFanOut, type SourceEvent } from "../_shared/memory_fanout.ts";
 
-const DEPLOY_MARK = "paper-engine-tick:fanout-probe:v2026-02-18a";
+const DEPLOY_MARK = "paper-engine-tick:canary:v2.0.2";
+const CANARY_VERSION_TAG = "v2.0.2-canary";
+const CANARY_EMITTER_TAG = "paper-engine-tick v2.0.2-canary";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -85,18 +87,18 @@ class PaperEngineCore {
     payload: Record<string, unknown>,
   ) {
     try {
-      // ── Build final payload: spread caller keys, append candle_ts.
+      // ── Build final payload: spread caller keys, append candle_ts + __emitter canary stamp.
       // Use JSON round-trip to convert undefined → null so no keys are silently dropped.
-      const rawPayload = { ...payload, candle_ts: this.candle.ts };
+      const rawPayload = { ...payload, candle_ts: this.candle.ts, __emitter: CANARY_EMITTER_TAG };
       const finalPayload: Record<string, unknown> = JSON.parse(
         JSON.stringify(rawPayload, (_k, v) => (v === undefined ? null : v))
       );
 
-      // ── DEBUG (telemetry-only): log key presence for POSITION_CLOSED
+      // ── CANARY DEBUG (telemetry-only): log key presence for POSITION_CLOSED
       if (eventType === "POSITION_CLOSED") {
-        console.log("[EMIT_DEBUG] POSITION_CLOSED payload keys:", Object.keys(finalPayload));
-        console.log("[EMIT_DEBUG] has decision_id key:", Object.prototype.hasOwnProperty.call(finalPayload, "decision_id"));
-        console.log("[EMIT_DEBUG] position_id =", finalPayload["position_id"], "| decision_id =", finalPayload["decision_id"]);
+        console.log(`[CANARY ${CANARY_EMITTER_TAG}] POSITION_CLOSED payload keys:`, Object.keys(finalPayload));
+        console.log(`[CANARY ${CANARY_EMITTER_TAG}] has decision_id key:`, Object.prototype.hasOwnProperty.call(finalPayload, "decision_id"));
+        console.log(`[CANARY ${CANARY_EMITTER_TAG}] position_id =`, finalPayload["position_id"], "| decision_id =", finalPayload["decision_id"]);
       }
 
       await this.sb.from("paper_engine_events").insert({
@@ -104,7 +106,7 @@ class PaperEngineCore {
         entity_type: entityType,
         entity_id: entityId,
         event_type: eventType,
-        version_tag: this.policy.version_tag,
+        version_tag: CANARY_VERSION_TAG,  // hardcoded canary — overrides policy.version_tag
         ts: new Date().toISOString(),
         payload: finalPayload,
       });
