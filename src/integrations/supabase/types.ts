@@ -275,6 +275,39 @@ export type Database = {
         }
         Relationships: []
       }
+      atlas_autopause_policy: {
+        Row: {
+          cohort_id: string
+          enabled: boolean
+          min_avg_r: number
+          min_trades: number
+          min_win_rate: number
+          pause_minutes: number
+          timeframe: string
+          updated_at: string
+        }
+        Insert: {
+          cohort_id: string
+          enabled?: boolean
+          min_avg_r?: number
+          min_trades?: number
+          min_win_rate?: number
+          pause_minutes?: number
+          timeframe: string
+          updated_at?: string
+        }
+        Update: {
+          cohort_id?: string
+          enabled?: boolean
+          min_avg_r?: number
+          min_trades?: number
+          min_win_rate?: number
+          pause_minutes?: number
+          timeframe?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       atlas_brain_cursor: {
         Row: {
           id: number
@@ -496,6 +529,33 @@ export type Database = {
         }
         Relationships: []
       }
+      atlas_regime_state: {
+        Row: {
+          cohort_id: string
+          regime_epoch: number
+          regime_label: string
+          symbol: string
+          timeframe: string
+          updated_at: string
+        }
+        Insert: {
+          cohort_id: string
+          regime_epoch?: number
+          regime_label: string
+          symbol: string
+          timeframe: string
+          updated_at?: string
+        }
+        Update: {
+          cohort_id?: string
+          regime_epoch?: number
+          regime_label?: string
+          symbol?: string
+          timeframe?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       atlas_settings: {
         Row: {
           eval_cadence_ms: number
@@ -517,6 +577,39 @@ export type Database = {
           id?: string
           last_auto_eval_at?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      atlas_trade_throttle: {
+        Row: {
+          cohort_id: string
+          reason: string | null
+          set_at: string
+          set_by: string | null
+          status: string
+          symbol: string
+          timeframe: string
+          until_ts: string | null
+        }
+        Insert: {
+          cohort_id: string
+          reason?: string | null
+          set_at?: string
+          set_by?: string | null
+          status: string
+          symbol: string
+          timeframe: string
+          until_ts?: string | null
+        }
+        Update: {
+          cohort_id?: string
+          reason?: string | null
+          set_at?: string
+          set_by?: string | null
+          status?: string
+          symbol?: string
+          timeframe?: string
+          until_ts?: string | null
         }
         Relationships: []
       }
@@ -2718,32 +2811,41 @@ export type Database = {
       }
       paper_engine_events: {
         Row: {
+          cohort_id: string | null
           entity_id: string | null
           entity_type: string
           event_type: string
           id: string
           payload: Json
           run_id: string | null
+          symbol: string | null
+          timeframe: string | null
           ts: string
           version_tag: string | null
         }
         Insert: {
+          cohort_id?: string | null
           entity_id?: string | null
           entity_type: string
           event_type: string
           id?: string
           payload?: Json
           run_id?: string | null
+          symbol?: string | null
+          timeframe?: string | null
           ts?: string
           version_tag?: string | null
         }
         Update: {
+          cohort_id?: string | null
           entity_id?: string | null
           entity_type?: string
           event_type?: string
           id?: string
           payload?: Json
           run_id?: string | null
+          symbol?: string | null
+          timeframe?: string | null
           ts?: string
           version_tag?: string | null
         }
@@ -3021,7 +3123,10 @@ export type Database = {
           realized_pct: number | null
           realized_pnl: number | null
           realized_r: number | null
+          regime_epoch: number | null
+          regime_epoch_at_entry: number | null
           regime_label: string | null
+          regime_label_at_entry: string | null
           risk_profile: Json | null
           risk_profile_key: string | null
           run_id: string | null
@@ -3070,7 +3175,10 @@ export type Database = {
           realized_pct?: number | null
           realized_pnl?: number | null
           realized_r?: number | null
+          regime_epoch?: number | null
+          regime_epoch_at_entry?: number | null
           regime_label?: string | null
+          regime_label_at_entry?: string | null
           risk_profile?: Json | null
           risk_profile_key?: string | null
           run_id?: string | null
@@ -3119,7 +3227,10 @@ export type Database = {
           realized_pct?: number | null
           realized_pnl?: number | null
           realized_r?: number | null
+          regime_epoch?: number | null
+          regime_epoch_at_entry?: number | null
           regime_label?: string | null
+          regime_label_at_entry?: string | null
           risk_profile?: Json | null
           risk_profile_key?: string | null
           run_id?: string | null
@@ -4837,6 +4948,56 @@ export type Database = {
       }
     }
     Views: {
+      atlas_exposure_by_bucket: {
+        Row: {
+          cohort_id: string | null
+          open_long: number | null
+          open_short: number | null
+          open_total: number | null
+          pending_long: number | null
+          pending_short: number | null
+          pending_total: number | null
+          symbol: string | null
+          timeframe: string | null
+        }
+        Relationships: []
+      }
+      atlas_invariant_simultaneous_long_short: {
+        Row: {
+          cohort_id: string | null
+          open_long: number | null
+          open_short: number | null
+          open_total: number | null
+          pending_long: number | null
+          pending_short: number | null
+          pending_total: number | null
+          symbol: string | null
+          timeframe: string | null
+        }
+        Relationships: []
+      }
+      atlas_perf_rollup_last30: {
+        Row: {
+          avg_r: number | null
+          cohort_id: string | null
+          n: number | null
+          newest_closed_at: string | null
+          strategy_blueprint_id: string | null
+          symbol: string | null
+          timeframe: string | null
+          total_r: number | null
+          win_rate: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paper_positions_strategy_blueprint_id_fkey"
+            columns: ["strategy_blueprint_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_blueprints"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       paper_trades: {
         Row: {
           asset_id: string | null
@@ -5210,9 +5371,64 @@ export type Database = {
       }
     }
     Functions: {
+      atlas_apply_autopause: {
+        Args: { p_cohort_id: string }
+        Returns: {
+          details: Json
+          paused: number
+        }[]
+      }
+      atlas_invariant_active_bucket_status: {
+        Args: { p_cohort_id?: string }
+        Returns: {
+          checked_at: string
+          ok: boolean
+          violation_count: number
+        }[]
+      }
+      atlas_invariant_active_bucket_violations: {
+        Args: { p_cohort_id?: string }
+        Returns: {
+          active_n: number
+          cohort_id: string
+          newest_created_at: string
+          open_n: number
+          pending_n: number
+          position_ids: string[]
+          symbol: string
+          timeframe: string
+        }[]
+      }
+      atlas_repair_simultaneous_long_short: {
+        Args: { p_cohort_id: string; p_symbol: string; p_timeframe: string }
+        Returns: {
+          canceled: number
+          canceled_position_ids: string[]
+        }[]
+      }
       atlas_settings_touch_asset_cadence: {
         Args: { p_asset: string; p_ts: string }
         Returns: undefined
+      }
+      atlas_should_allow_trade: {
+        Args: { p_cohort_id: string; p_symbol: string; p_timeframe: string }
+        Returns: {
+          allow_trade: boolean
+          block_reason: string
+        }[]
+      }
+      atlas_update_regime: {
+        Args: {
+          p_cohort_id: string
+          p_regime_label: string
+          p_symbol: string
+          p_timeframe: string
+        }
+        Returns: {
+          regime_epoch: number
+          regime_label: string
+          updated_at: string
+        }[]
       }
       brain_acquire_lease: {
         Args: { p_lease_seconds?: number; p_owner: string }
