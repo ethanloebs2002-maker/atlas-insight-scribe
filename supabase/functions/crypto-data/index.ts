@@ -76,6 +76,65 @@ function getTimeframeConfig(tf: string): { endpoint: string; aggregate: number }
   }
 }
 
+const BINANCE_BASE = "https://data-api.binance.vision";
+const BINANCE_INTERVAL: Record<string, string> = {
+  "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h",
+  "4h": "4h", "1d": "1d", "1w": "1w", "1M": "1M",
+};
+
+async function fetchBinanceOHLCV(symbol: string, limit: number, timeframe: string): Promise<KlineData[]> {
+  const pair = `${symbol.toUpperCase()}USDT`;
+  const interval = BINANCE_INTERVAL[timeframe] || "4h";
+  const url = `${BINANCE_BASE}/api/v3/klines?symbol=${pair}&interval=${interval}&limit=${limit}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error("Binance kline error:", res.status, await res.text());
+      return [];
+    }
+    const arr = await res.json();
+    if (!Array.isArray(arr)) return [];
+    return arr.map((k: any) => ({
+      openTime: k[0],
+      open: Number(k[1]),
+      high: Number(k[2]),
+      low: Number(k[3]),
+      close: Number(k[4]),
+      volume: Number(k[5]),
+    }));
+  } catch (e) {
+    console.error("Binance kline fetch error:", e);
+    return [];
+  }
+}
+
+async function fetchBinanceMarket(symbols: string[]): Promise<MarketData[]> {
+  const out: MarketData[] = [];
+  await Promise.all(symbols.map(async (s) => {
+    const sym = s.toUpperCase();
+    if (!COIN_NAMES[sym]) return;
+    const pair = `${sym}USDT`;
+    try {
+      const res = await fetch(`${BINANCE_BASE}/api/v3/ticker/24hr?symbol=${pair}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      const price = Number(d.lastPrice);
+      if (!Number.isFinite(price) || price <= 0) return;
+      out.push({
+        symbol: sym,
+        name: COIN_NAMES[sym] || sym,
+        price,
+        change24h: Number(d.priceChangePercent) || 0,
+        volume24h: Number(d.quoteVolume) || 0,
+        marketCap: 0,
+      });
+    } catch (e) {
+      console.error("Binance market fetch error:", e);
+    }
+  }));
+  return out;
+}
+
 async function fetchCryptoCompareOHLCV(symbol: string, limit: number = 100, timeframe: string = '4h'): Promise<KlineData[]> {
   const fsym = symbol.toUpperCase();
   if (!COIN_NAMES[fsym]) return [];
