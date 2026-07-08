@@ -374,7 +374,10 @@ serve(async (req) => {
     const symbols = symbolsParam.split(",").map(s => s.trim().toUpperCase());
 
     if (action === "market") {
-      const markets = await fetchCryptoCompareMarket(symbols);
+      let markets = await fetchCryptoCompareMarket(symbols);
+      if (!markets.length) {
+        markets = await fetchBinanceMarket(symbols);
+      }
 
       // Persist latest prices to DB for execution auditability
       if (markets.length > 0) {
@@ -407,10 +410,16 @@ serve(async (req) => {
     if (action === "analysis") {
       const symbol = symbols[0];
       const tf = url.searchParams.get("timeframe") || "4h";
-      const [markets, klines] = await Promise.all([
+      let [markets, klines] = await Promise.all([
         fetchCryptoCompareMarket([symbol]),
         fetchCryptoCompareOHLCV(symbol, 100, tf),
       ]);
+      if (!klines.length) {
+        klines = await fetchBinanceOHLCV(symbol, 100, tf);
+      }
+      if (!markets.length) {
+        markets = await fetchBinanceMarket([symbol]);
+      }
 
       if (!klines.length) {
         return new Response(
