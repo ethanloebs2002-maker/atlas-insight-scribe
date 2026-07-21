@@ -16,8 +16,8 @@ import MetaCognition from "@/pages/MetaCognition";
 import GlobalPatternLibrary from "@/pages/GlobalPatternLibrary";
 import StrategyLab from "@/pages/StrategyLab";
 import ArchivePage from "@/pages/Archive";
-import Login from "@/pages/Login";
 import NotFound from "./pages/NotFound";
+import { Navigate } from "react-router-dom";
 
 const queryClient = new QueryClient();
 
@@ -30,7 +30,7 @@ const App = () => (
           <Sonner />
           <BrowserRouter>
             <Routes>
-              <Route path="/login" element={<Login />} />
+              <Route path="/login" element={<Navigate to="/" replace />} />
               <Route
                 path="/*"
                 element={
