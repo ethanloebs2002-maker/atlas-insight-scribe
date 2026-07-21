@@ -185,8 +185,15 @@ async function ingestNews(asset?: string) {
   const params = new URLSearchParams({ lang: "EN" });
   if (asset) params.set("categories", asset);
 
-  const res = await fetch(`${CC_NEWS_URL}?${params}`);
-  if (!res.ok) throw new Error(`CryptoCompare news fetch failed: ${res.status}`);
+  const ccKey = Deno.env.get("CRYPTOCOMPARE_API_KEY");
+  const headers: Record<string, string> = {};
+  if (ccKey) headers["authorization"] = `Apikey ${ccKey}`;
+
+  const res = await fetch(`${CC_NEWS_URL}?${params}`, { headers });
+  if (!res.ok) {
+    console.warn(`CryptoCompare news fetch failed: ${res.status} — returning 0 ingested`);
+    return { ingested: 0, skipped: 0, error: `cryptocompare_${res.status}` };
+  }
   const json = await res.json();
   const articles = json.Data || [];
 
